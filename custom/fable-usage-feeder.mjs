@@ -23,6 +23,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as https from 'node:https';
+import { execFileSync } from 'node:child_process';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const SNAPSHOT_PATH = path.join(HERE, 'usage-snapshot.json');
@@ -98,13 +99,35 @@ function claudeConfigDir() {
   return path.join(os.homedir(), '.claude');
 }
 
-function readAccessToken() {
+// Claude Code stores OAuth credentials in `.credentials.json` on Windows/Linux,
+// but on macOS it keeps them in the login Keychain (service "Claude Code-credentials")
+// and the file normally does not exist. Prefer the file when present (covers
+// CLAUDE_CONFIG_DIR setups), then fall back to the Keychain on darwin.
+function readCredentials() {
   const credPath = path.join(claudeConfigDir(), '.credentials.json');
-  const raw = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+  if (fs.existsSync(credPath)) {
+    return { raw: JSON.parse(fs.readFileSync(credPath, 'utf8')), source: '.credentials.json' };
+  }
+  if (process.platform === 'darwin') {
+    const out = execFileSync(
+      '/usr/bin/security',
+      ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000 },
+    ).trim();
+    if (!out) {
+      throw new Error('Keychain item "Claude Code-credentials" is empty');
+    }
+    return { raw: JSON.parse(out), source: 'Keychain' };
+  }
+  throw new Error(`no credentials file at ${credPath}`);
+}
+
+function readAccessToken() {
+  const { raw, source } = readCredentials();
   const oauth = raw?.claudeAiOauth;
   const token = oauth?.accessToken;
   if (typeof token !== 'string' || !token) {
-    throw new Error('no accessToken in .credentials.json');
+    throw new Error(`no accessToken in ${source}`);
   }
   if (typeof oauth.expiresAt === 'number' && oauth.expiresAt <= Date.now()) {
     throw new Error('accessToken expired; waiting for Claude Code to refresh it');

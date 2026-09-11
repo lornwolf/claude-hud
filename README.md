@@ -22,7 +22,7 @@ CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░
 
 | 文件 | 作用 |
 |------|------|
-| `fable-usage-feeder.mjs` | 调 OAuth usage API（`/api/oauth/usage`），把按模型的周用量（如 Fable）写成 `usage-snapshot.json`，HUD 通过 `display.externalUsagePath` 原生读取。5 分钟内不重复请求，文件锁防并发，结果记 `usage-feeder.log`。手动测试：`node fable-usage-feeder.mjs --force`（bun 亦可） |
+| `fable-usage-feeder.mjs` | 调 OAuth usage API（`/api/oauth/usage`），把按模型的周用量（如 Fable）写成 `usage-snapshot.json`，HUD 通过 `display.externalUsagePath` 原生读取。5 分钟内不重复请求，文件锁防并发，结果记 `usage-feeder.log`。凭据优先读 `~/.claude/.credentials.json`（Windows/Linux）；macOS 上该文件通常不存在，改从登录钥匙串的 `Claude Code-credentials` 条目读取（`security find-generic-password`）。手动测试：`node fable-usage-feeder.mjs --force`（bun 亦可） |
 | `account-label.mjs` | 把当前登录账号（`~/.claude.json` 的 `oauthAccount`：名称 · 邮箱）写进 `config.json` 的 `display.customLine`，HUD 原生渲染在第一行最右侧，渲染时零开销。只在 `~/.claude.json` 比 `account-label.stamp` 新时（启动 Claude Code 或 `/login` 后）由 statusLine 命令调起，账号没变不改文件；API Key 登录或读不到账号时清空 |
 | `sys-usage-line.mjs` | 在 HUD 之后追加两行：日期行（公历 + 农历 + 中国传统节日 + 七色星期）和 CPU/RAM 行。CPU 温度依次尝试：LibreHardwareMonitor 本机 Web 接口 → Windows 无需管理员的 ACPI 温区性能计数器（`typeperf` 后台采样，缓存在 `acpi-temp.csv`，30 秒刷新一次）→ Linux `/sys/class/thermal`；都读不到时静默省略。测试日期行：`SYSLINE_DATE=2026-09-25 node sys-usage-line.mjs` |
 | `config.json` | HUD 配置。`externalUsagePath` 必须是**绝对路径**（插件不展开 `~`），请把占位符换掉。`customLine` 留空，由 `account-label.mjs` 自动维护（手动改会被覆盖）；`showDuration` 关闭，第一行最右侧留给账号 |
@@ -64,7 +64,7 @@ CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░
 
 | 现象 | 先看 |
 |------|------|
-| `Fable Weekly` 不显示 | `usage-feeder.log`。常见是 accessToken 过期（等 Claude Code 刷新后自动恢复），或快照超过 15 分钟被判过期 |
+| `Fable Weekly` 不显示 | `usage-feeder.log`。常见是 accessToken 过期（等 Claude Code 刷新后自动恢复），或快照超过 15 分钟被判过期。macOS：确认钥匙串里有 `Claude Code-credentials` 条目（`security find-generic-password -s "Claude Code-credentials"`），没有就重新 `/login` |
 | 底部两行消失 | `statusLine.command` 是否被 `/claude-hud:setup` 重写 |
 | HUD 完全不显示（Windows） | 执行 statusLine 的是 Git Bash：命令里不能有 `C:\...` 反斜杠路径（会被吃成 `C:...`），用 `/c/...`；把 settings.json 里的命令原样喂给 `bash -c` 看报错 |
 | 账号不显示 / 换号后没更新 | 删掉 `account-label.stamp`，下次刷新即重新同步；再看 `config.json` 的 `display.customLine` |

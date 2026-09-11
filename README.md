@@ -40,6 +40,20 @@ CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░
    - 自启：它需要管理员权限，用提权的计划任务在登录时启动，避免每次开机弹 UAC。可以直接勾选菜单 Options → Run On Windows Startup；自己建任务的话，笔记本记得允许用电池时启动（计划任务默认禁止），并取消运行时长限制。
    - 传感器 ID 因 CPU 而异（例如 `/intelcpu/0/temperature/8` 或 `/4`），`sys-usage-line.mjs` 找不到固定 ID 时会按名称 `CPU Package` 匹配，不用改脚本。
 
+## 运行时文件（已被 .gitignore 忽略）
+
+脚本运行时会在自己所在目录（安装后即 `~/.claude/plugins/claude-hud/`）旁边生成下列文件，都是缓存或日志，删掉后下次渲染会自动重建，不需要提交：
+
+| 文件 | 来源 | 内容 |
+|------|------|------|
+| `usage-snapshot.json` | `fable-usage-feeder.mjs` | 按模型的用量快照，HUD 通过 `externalUsagePath` 读取 |
+| `usage-feeder.log` | `fable-usage-feeder.mjs` | 每次请求 usage API 的结果，排障先看这里 |
+| `usage-feeder.stamp` / `usage-feeder.lock` | `fable-usage-feeder.mjs` | 上次请求时间戳，以及防并发的文件锁 |
+| `account-label.stamp` | `account-label.mjs` | 上次同步账号的时间戳，删掉可强制重新同步 |
+| `cpu-sample.json` | `sys-usage-line.mjs` | 上一次 CPU 采样，用于算两次渲染之间的使用率 |
+| `acpi-temp.csv` / `acpi-temp.csv.stamp` | `sys-usage-line.mjs` | Windows 下 `typeperf` 采到的 ACPI 温区数据及采样时间戳 |
+| `*.tmp` | 各脚本 | 原子写入时的临时文件，正常情况下不会残留 |
+
 ## 为什么不用插件自带功能
 
 - Claude Code 传给状态栏的 stdin `rate_limits` 只有合算的 5h/7d，没有按模型的窗口。

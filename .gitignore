@@ -1,0 +1,19 @@
+# Runtime files written by the custom scripts next to themselves
+usage-snapshot.json
+usage-feeder.log
+cpu-sample.json
+acpi-temp.csv
+*.tmp
+*.lock
+
+# Logs
+*.log
+
+# Node
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

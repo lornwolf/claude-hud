@@ -1,0 +1,35 @@
+{
+  "lineLayout": "expanded",
+  "showSeparators": false,
+  "gitStatus": {
+    "enabled": true,
+    "showDirty": true,
+    "showAheadBehind": false,
+    "showFileStats": false
+  },
+  "display": {
+    "showModel": true,
+    "showContextBar": true,
+    "showTools": false,
+    "showAgents": true,
+    "showTodos": true,
+    "showProject": true,
+    "showConfigCounts": false,
+    "showTokenBreakdown": true,
+    "showSpeed": true,
+    "showUsage": true,
+    "usageBarEnabled": true,
+    "showSessionName": true,
+    "showDuration": false,
+    "externalUsagePath": "<ABSOLUTE_PATH_TO>/.claude/plugins/claude-hud/usage-snapshot.json",
+    "externalUsageFreshnessMs": 900000,
+    "showModelScopedUsage": true,
+    "sevenDayThreshold": 0,
+    "customLine": "",
+    "customLinePosition": "last"
+  },
+  "pathLevels": "full",
+  "colors": {
+    "custom": "dim"
+  }
+}

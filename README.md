@@ -15,7 +15,7 @@
 [Fable 5.1] │ C:/workspace_git/documents git:(main) │ 张三 · user@example.com
 Context ░░░░░░░░░░ 0% │ Usage ░░░░░░░░░░ 3% (resets in 3h 44m) | Weekly ██░░░░░░░░ 20% (resets in 3d 4h) | Fable Weekly ████░░░░░░ 36% (resets in 3d 4h)
 今天是2026年9月9日，农历七月廿八，星期三。
-CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░░ 63% (20.1 GB / 31.9 GB)
+CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░░ 63% (20.1 GB / 31.9 GB) │ Swap 1.2 GB
 ```
 
 ## 文件（custom 目录下）
@@ -24,7 +24,7 @@ CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░
 |------|------|
 | `fable-usage-feeder.mjs` | 调 OAuth usage API（`/api/oauth/usage`），把按模型的周用量（如 Fable）写成 `usage-snapshot.json`，HUD 通过 `display.externalUsagePath` 原生读取。5 分钟内不重复请求，文件锁防并发，结果记 `usage-feeder.log`。凭据优先读 `~/.claude/.credentials.json`（Windows/Linux）；macOS 上该文件通常不存在，改从登录钥匙串的 `Claude Code-credentials` 条目读取（`security find-generic-password`）。手动测试：`node fable-usage-feeder.mjs --force`（bun 亦可） |
 | `account-label.mjs` | 把当前登录账号（`~/.claude.json` 的 `oauthAccount`：名称 · 邮箱）写进 `config.json` 的 `display.customLine`，HUD 原生渲染在第一行最右侧，渲染时零开销。只在 `~/.claude.json` 比 `account-label.stamp` 新时（启动 Claude Code 或 `/login` 后）由 statusLine 命令调起，账号没变不改文件；API Key 登录或读不到账号时清空 |
-| `sys-usage-line.mjs` | 在 HUD 之后追加两行：日期行（公历 + 农历 + 中国传统节日 + 七色星期）和 CPU/RAM 行。CPU 温度依次尝试：LibreHardwareMonitor 本机 Web 接口 → Windows 无需管理员的 ACPI 温区性能计数器（`typeperf` 后台采样，缓存在 `acpi-temp.csv`，30 秒刷新一次）→ Linux `/sys/class/thermal`；都读不到时静默省略。测试日期行：`SYSLINE_DATE=2026-09-25 node sys-usage-line.mjs` |
+| `sys-usage-line.mjs` | 在 HUD 之后追加两行：日期行（公历 + 农历 + 中国传统节日 + 七色星期）和 CPU/RAM 行。CPU 温度依次尝试：LibreHardwareMonitor 本机 Web 接口 → Windows 无需管理员的 ACPI 温区性能计数器（`typeperf` 后台采样，缓存在 `acpi-temp.csv`，30 秒刷新一次）→ Linux `/sys/class/thermal`；都读不到时静默省略。RAM 颜色：macOS 上 `os.freemem()` 把文件缓存也算成已用，占用率常年 99%，所以改按内核压力等级 `kern.memorystatus_vm_pressure_level` 着色（1 正常 → 蓝，2 警告 → 品红，3/4 紧急/严重 → 红，即活动监视器压力图的绿/黄/红），百分比照常显示；Windows/Linux 或读不到时仍按 ≥75% / ≥90% 着色。RAM 后面附 Swap：macOS 读 `sysctl vm.swapusage`，只显示已用量（总量按需增长，没有参考意义）；Linux 读 `/proc/meminfo`，显示已用 / 总量；Windows 省略。已用为 0 时暗色，否则沿用 RAM 的颜色，压力高时一起变红。测试日期行：`SYSLINE_DATE=2026-09-25 node sys-usage-line.mjs` |
 | `config.json` | HUD 配置。`externalUsagePath` 必须是**绝对路径**（插件不展开 `~`），请把占位符换掉。`customLine` 留空，由 `account-label.mjs` 自动维护（手动改会被覆盖）；`showDuration` 关闭，第一行最右侧留给账号 |
 | `statusline-command.sh` | `statusLine.command` 的可读版本（settings.json 里是一行），运行时可选 node 或 bun |
 

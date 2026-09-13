@@ -13,7 +13,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const SAMPLE_PATH = path.join(HERE, 'cpu-sample.json');
@@ -53,12 +53,39 @@ function quotaColor(percent, colors) {
   return resolveAnsi(colors.usage, NAMED.brightBlue);
 }
 
-function quotaBar(percent, width, colors) {
+function quotaBar(percent, width, colors, color = quotaColor(percent, colors)) {
   const p = Math.min(100, Math.max(0, percent));
   const filled = Math.round((p / 100) * width);
   const filledChar = colors.barFilled ?? '█';
   const emptyChar = colors.barEmpty ?? '░';
-  return `${quotaColor(p, colors)}${filledChar.repeat(filled)}${DIM}${emptyChar.repeat(width - filled)}${RESET}`;
+  return `${color}${filledChar.repeat(filled)}${DIM}${emptyChar.repeat(width - filled)}${RESET}`;
+}
+
+// macOS keeps otherwise-idle RAM busy as file cache, so "used %" sits near
+// 100% on a perfectly healthy machine. The kernel's own memory-pressure level
+// (what Activity Monitor's pressure graph plots) is the real signal:
+//   1 normal (green)  2 warning (yellow)  3 urgent / 4 critical (red)
+// Returns null off macOS or when sysctl fails, so callers fall back to percent.
+function macMemoryPressureLevel() {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const out = execFileSync('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'],
+      { encoding: 'utf8', timeout: 500, stdio: ['ignore', 'pipe', 'ignore'] });
+    const level = Number.parseInt(out.trim(), 10);
+    return Number.isFinite(level) && level >= 1 ? level : null;
+  } catch {
+    return null;
+  }
+}
+
+// RAM color: on macOS follow the pressure level (percent alone would always be
+// red there); elsewhere keep the percent thresholds shared with CPU/quota.
+function memColor(percent, colors) {
+  const level = macMemoryPressureLevel();
+  if (level === null) return quotaColor(percent, colors);
+  if (level >= 3) return resolveAnsi(colors.critical, NAMED.red);
+  if (level === 2) return resolveAnsi(colors.usageWarning, NAMED.brightMagenta);
+  return resolveAnsi(colors.usage, NAMED.brightBlue);
 }
 
 function barWidth() {
@@ -114,6 +141,39 @@ function cpuPercent() {
 
 function gb(bytes) {
   return `${(bytes / 2 ** 30).toFixed(1)} GB`;
+}
+
+// Swap in use, in bytes: { used, total } or null when unknown.
+// macOS: `sysctl vm.swapusage` -> "total = 2048.00M  used = 1234.50M  free = ...";
+//   total grows on demand, so only `used` is meaningful there.
+// Linux: /proc/meminfo SwapTotal/SwapFree (kB).
+// Windows: omitted (Win32_PageFileUsage needs PowerShell/WMI, too slow per render).
+function swapUsage() {
+  try {
+    if (process.platform === 'darwin') {
+      const out = execFileSync('sysctl', ['-n', 'vm.swapusage'],
+        { encoding: 'utf8', timeout: 500, stdio: ['ignore', 'pipe', 'ignore'] });
+      const num = (key) => {
+        const m = out.match(new RegExp(`${key}\\s*=\\s*([\\d.]+)([KMGT]?)`));
+        if (!m) return null;
+        const mult = { '': 1, K: 2 ** 10, M: 2 ** 20, G: 2 ** 30, T: 2 ** 40 }[m[2]];
+        return Number.parseFloat(m[1]) * mult;
+      };
+      const used = num('used'), total = num('total');
+      return used === null ? null : { used, total };
+    }
+    if (process.platform === 'linux') {
+      const info = fs.readFileSync('/proc/meminfo', 'utf8');
+      const kb = (key) => {
+        const m = info.match(new RegExp(`^${key}:\\s*(\\d+) kB`, 'm'));
+        return m ? Number.parseInt(m[1], 10) * 1024 : null;
+      };
+      const total = kb('SwapTotal'), free = kb('SwapFree');
+      if (total === null || free === null) return null;
+      return { used: total - free, total };
+    }
+  } catch { /* fall through */ }
+  return null;
 }
 
 // CPU temperature, tried in order:
@@ -380,12 +440,26 @@ async function main() {
   const free = Math.min(Math.max(os.freemem(), 0), total);
   const used = total - free;
   const memPercent = Math.round((used / total) * 100);
-  const memPart = `${label('RAM')} ${quotaBar(memPercent, width, colors)} ${pct(memPercent)} ${label(`(${gb(used)} / ${gb(total)})`)}`;
+  const memCol = memColor(memPercent, colors);
+  const memPart = `${label('RAM')} ${quotaBar(memPercent, width, colors, memCol)} ${memCol}${memPercent}%${RESET} ${label(`(${gb(used)} / ${gb(total)})`)}`;
+
+  // Swap: on macOS show only the amount in use (total is elastic); on Linux
+  // used / total. Colored with the RAM color so heavy swapping under pressure
+  // reads red, and dim like a label when swap is idle.
+  const swap = swapUsage();
+  let swapPart = '';
+  if (swap) {
+    const swapText = process.platform === 'darwin' || !swap.total
+      ? gb(swap.used)
+      : `${gb(swap.used)} / ${gb(swap.total)}`;
+    const swapCol = swap.used > 0 ? memCol : labelColor;
+    swapPart = ` │ ${label('Swap')} ${swapCol}${swapText}${RESET}`;
+  }
 
   // SYSLINE_DATE=YYYY-MM-DD 仅用于测试日期行
   const testDate = process.env.SYSLINE_DATE ? new Date(`${process.env.SYSLINE_DATE}T12:00:00`) : null;
   const dl = testDate && !Number.isNaN(testDate.getTime()) ? dateLine(testDate) : dateLine();
-  process.stdout.write(`${dl}\n${cpuPart} │ ${memPart}\n`);
+  process.stdout.write(`${dl}\n${cpuPart} │ ${memPart}${swapPart}\n`);
 }
 
 main();

@@ -2,6 +2,7 @@
 usage-snapshot.json
 usage-feeder.log
 cpu-sample.json
+account-label.json
 acpi-temp.csv
 *.stamp
 *.tmp

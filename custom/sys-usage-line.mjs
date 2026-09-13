@@ -7,8 +7,9 @@
 // plugin upgrades keep it.
 //
 // On narrow terminals (COLUMNS < HUD_NARROW_COLS, default 150) the bars are
-// dropped and claude-hud's own bar / "resets in" switches are synced into
-// config.json before the plugin renders, so both rows degrade together.
+// dropped and claude-hud's own switches are synced into config.json before the
+// plugin renders: no bars, no "resets in", current directory name instead of
+// the full path, account name without the email.
 //
 // The date line follows the OS display language: Chinese systems get the
 // Gregorian date + 农历 + Chinese festivals, Japanese systems get 令和 era +
@@ -25,6 +26,7 @@ import { execFileSync, spawn } from 'node:child_process';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const SAMPLE_PATH = path.join(HERE, 'cpu-sample.json');
+const ACCOUNT_PATH = path.join(HERE, 'account-label.json');
 const CONFIG_PATH = path.join(HERE, 'config.json');
 
 const MIN_SAMPLE_GAP_MS = 250;
@@ -106,21 +108,43 @@ function isNarrow() {
   return cols < (Number.isFinite(limit) && limit > 0 ? limit : 150);
 }
 
-// HUD 本体没有按宽度切换的开关，所以在它运行之前把 display.usageBarEnabled /
-// showResetLabel / showContextBar 写进 config.json（statusline 命令因此先跑本脚本）。
-// 只在值变化时才改写，改写后 mtime 变化会让插件的配置缓存失效。这三项由本脚本托管，
+// HUD 本体没有按宽度切换的开关，所以在它运行之前把下面几项写进 config.json
+// （statusline 命令因此先跑本脚本）：
+//   display.usageBarEnabled / showResetLabel / showContextBar  宽 true，窄 false
+//   pathLevels                                                  宽 'full'（完整路径），窄 1（只留当前目录名）
+//   display.customLine                                          宽 "姓名 · 邮箱"，窄只留姓名
+//     账号来自 account-label.mjs 维护的 account-label.json；文件还没生成时不动 customLine
+// 只在值变化时才改写，改写后 mtime 变化会让插件的配置缓存失效。这些项由本脚本托管，
 // 手动改会被覆盖。
+function accountLabel(narrow) {
+  try {
+    const { displayName = '', emailAddress = '' } = JSON.parse(fs.readFileSync(ACCOUNT_PATH, 'utf8'));
+    if (narrow) return displayName || emailAddress;
+    return [displayName, emailAddress].filter(Boolean).join(' · ');
+  } catch {
+    return null;
+  }
+}
+
 function syncHudConfigForWidth(narrow) {
   try {
     const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     config.display ??= {};
-    const want = { usageBarEnabled: !narrow, showResetLabel: !narrow, showContextBar: !narrow };
     let changed = false;
-    for (const [key, value] of Object.entries(want)) {
-      if (config.display[key] !== value) {
-        config.display[key] = value;
+    const set = (obj, key, value) => {
+      if (obj[key] !== value) {
+        obj[key] = value;
         changed = true;
       }
+    };
+    set(config.display, 'usageBarEnabled', !narrow);
+    set(config.display, 'showResetLabel', !narrow);
+    set(config.display, 'showContextBar', !narrow);
+    set(config, 'pathLevels', narrow ? 1 : 'full');
+    const label = accountLabel(narrow);
+    if (label !== null) {
+      set(config.display, 'customLine', label);
+      set(config.display, 'customLinePosition', 'last');
     }
     if (!changed) return;
     const tmp = `${CONFIG_PATH}.${process.pid}.tmp`;

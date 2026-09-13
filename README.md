@@ -18,13 +18,19 @@ Context ░░░░░░░░░░ 0% │ Usage ░░░░░░░░░�
 CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░░ 63% (20.1 GB / 31.9 GB) │ Swap 1.2 GB
 ```
 
+日文系统上第三行变为：
+
+```
+今日は2026年（令和8年）9月21日（敬老の日）、旧暦8月11日・赤口、月曜日です。
+```
+
 ## 文件（custom 目录下）
 
 | 文件 | 作用 |
 |------|------|
 | `fable-usage-feeder.mjs` | 调 OAuth usage API（`/api/oauth/usage`），把按模型的周用量（如 Fable）写成 `usage-snapshot.json`，HUD 通过 `display.externalUsagePath` 原生读取。5 分钟内不重复请求，文件锁防并发，结果记 `usage-feeder.log`。凭据优先读 `~/.claude/.credentials.json`（Windows/Linux）；macOS 上该文件通常不存在，改从登录钥匙串的 `Claude Code-credentials` 条目读取（`security find-generic-password`）。手动测试：`node fable-usage-feeder.mjs --force`（bun 亦可） |
 | `account-label.mjs` | 把当前登录账号（`~/.claude.json` 的 `oauthAccount`：名称 · 邮箱）写进 `config.json` 的 `display.customLine`，HUD 原生渲染在第一行最右侧，渲染时零开销。只在 `~/.claude.json` 比 `account-label.stamp` 新时（启动 Claude Code 或 `/login` 后）由 statusLine 命令调起，账号没变不改文件；API Key 登录或读不到账号时清空 |
-| `sys-usage-line.mjs` | 在 HUD 之后追加两行：日期行（公历 + 农历 + 中国传统节日 + 七色星期）和 CPU/RAM 行。CPU 温度依次尝试：LibreHardwareMonitor 本机 Web 接口 → Windows 无需管理员的 ACPI 温区性能计数器（`typeperf` 后台采样，缓存在 `acpi-temp.csv`，30 秒刷新一次）→ Linux `/sys/class/thermal`；都读不到时静默省略。RAM 颜色：macOS 上 `os.freemem()` 把文件缓存也算成已用，占用率常年 99%，所以改按内核压力等级 `kern.memorystatus_vm_pressure_level` 着色（1 正常 → 蓝，2 警告 → 品红，3/4 紧急/严重 → 红，即活动监视器压力图的绿/黄/红），百分比照常显示；Windows/Linux 或读不到时仍按 ≥75% / ≥90% 着色。RAM 后面附 Swap：macOS 读 `sysctl vm.swapusage`，只显示已用量（总量按需增长，没有参考意义）；Linux 读 `/proc/meminfo`，显示已用 / 总量；Windows 省略。已用为 0 时暗色，否则沿用 RAM 的颜色，压力高时一起变红。测试日期行：`SYSLINE_DATE=2026-09-25 node sys-usage-line.mjs` |
+| `sys-usage-line.mjs` | 在 HUD 之后追加两行：日期行和 CPU/RAM 行。日期行跟随系统显示语言：中文系统显示公历 + 农历 + 中国传统节日 + 七色星期；日文系统显示公历 + 令和年号 + 日本祝日（含振替休日、国民の休日）与節分/ひな祭り/七夕/お盆/大晦日 + 旧暦 + 六曜 + 七色星期，旧暦借用 ICU 的中国农历，与日本按 JST 推算的旧暦极少数日子会差一天。语言检测：macOS 读 `defaults read -g AppleLanguages` 首选语言，Windows 读注册表 `HKCU\Control Panel\International\User Profile\Languages`（退回 `LocaleName`），其他平台读 `LC_ALL`/`LC_MESSAGES`/`LANG`；不看进程的 `LANG`，因为 Claude Code 拉起 statusline 时它常是 `en_US.UTF-8`。既非中文也非日文时按中文显示。CPU 温度依次尝试：LibreHardwareMonitor 本机 Web 接口 → Windows 无需管理员的 ACPI 温区性能计数器（`typeperf` 后台采样，缓存在 `acpi-temp.csv`，30 秒刷新一次）→ Linux `/sys/class/thermal`；都读不到时静默省略。RAM 颜色：macOS 上 `os.freemem()` 把文件缓存也算成已用，占用率常年 99%，所以改按内核压力等级 `kern.memorystatus_vm_pressure_level` 着色（1 正常 → 蓝，2 警告 → 品红，3/4 紧急/严重 → 红，即活动监视器压力图的绿/黄/红），百分比照常显示；Windows/Linux 或读不到时仍按 ≥75% / ≥90% 着色。RAM 后面附 Swap：macOS 读 `sysctl vm.swapusage`，只显示已用量（总量按需增长，没有参考意义）；Linux 读 `/proc/meminfo`，显示已用 / 总量；Windows 省略。已用为 0 时暗色，否则沿用 RAM 的颜色，压力高时一起变红。测试日期行：`SYSLINE_DATE=2026-09-25 node sys-usage-line.mjs`，`SYSLINE_LANG=ja` 强制日文 |
 | `config.json` | HUD 配置。`externalUsagePath` 必须是**绝对路径**（插件不展开 `~`），请把占位符换掉。`customLine` 留空，由 `account-label.mjs` 自动维护（手动改会被覆盖）；`showDuration` 关闭，第一行最右侧留给账号 |
 | `statusline-command.sh` | `statusLine.command` 的可读版本（settings.json 里是一行），运行时可选 node 或 bun |
 
@@ -72,3 +78,4 @@ CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░
 | 温度明显偏低且几乎不变（如 28°C） | LibreHardwareMonitor 没在运行或 Web 接口没开，退回了 ACPI 温区，而这台机器的温区不是 CPU。`curl http://127.0.0.1:8085/data.json` 看是否有响应 |
 | 温度不显示 | Windows：首次渲染缓存为空属正常，第二次起显示；`acpi-temp.csv` 里没有数据说明本机没有 `Thermal Zone Information` 计数器。Linux：`/sys/class/thermal` 下没有温区 |
 | 农历缺失 | 运行时 ICU 不带中文日历时脚本静默省略农历，只显示公历和星期 |
+| 日期行语言不对 | `SYSLINE_LANG=ja node sys-usage-line.mjs` 能出日文说明脚本正常，是系统语言没读到：macOS 看 `defaults read -g AppleLanguages` 第一项，Windows 看 `reg query "HKCU\Control Panel\International\User Profile" /v Languages`。也可以在 statusLine 命令里直接 `export SYSLINE_LANG=ja` 固定 |

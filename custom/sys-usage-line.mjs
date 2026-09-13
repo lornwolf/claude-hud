@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 // sys-usage-line.mjs
 //
-// Prints one extra statusline row with host CPU and RAM usage, styled like
-// claude-hud's own progress lines (dim label, █░ quota bar, quota colors).
-// Invoked by the statusline command right after claude-hud so it lands on the
-// last line. Lives outside the plugin cache dir so plugin upgrades keep it.
+// Prints two extra statusline rows after claude-hud: a date line and a host
+// CPU / RAM / Swap line, styled like claude-hud's own progress lines (dim
+// label, █░ quota bar, quota colors). Lives outside the plugin cache dir so
+// plugin upgrades keep it.
+//
+// The date line follows the OS display language: Chinese systems get the
+// Gregorian date + 农历 + Chinese festivals, Japanese systems get 令和 era +
+// 旧暦 + 六曜 + 祝日. See systemLang() for how the language is detected.
 //
 // CPU% is derived from the os.cpus() tick delta since the previous render,
 // persisted in cpu-sample.json next to this file. Very short deltas reuse the
@@ -388,10 +392,123 @@ function festivalColor(now) {
   return `\x1b[1;38;2;${to(r1)};${to(g1)};${to(b1)}m`;
 }
 
-// "今天是2026年9月9日，农历七月廿八，星期三。"（节日时："…农历八月十五（中秋节），星期五。"）
-function dateLine(now = new Date()) {
+// 显示语言：'zh' 或 'ja'。优先读系统显示语言而不是进程环境变量——Claude Code
+// 拉起 statusline 时 LANG 往往是 en_US.UTF-8 或为空，跟系统设置无关。
+//   1. SYSLINE_LANG=zh|ja 强制指定（测试用）
+//   2. macOS: defaults read -g AppleLanguages 的第一项（系统设置 > 语言与地区 > 首选语言）
+//   3. Windows: 注册表 HKCU\Control Panel\International\User Profile\Languages（显示语言），
+//      读不到再退回 HKCU\Control Panel\International\LocaleName（区域格式）
+//   4. 其他 / 都读不到: LC_ALL, LC_MESSAGES, LANG, LANGUAGE，最后是 ICU 默认 locale
+// 第一个读到的语言标签就是结论；既不是中文也不是日文时按中文显示。
+function systemLang() {
+  const pick = (tag) => {
+    const t = String(tag ?? '').trim().toLowerCase();
+    if (/^ja(?![a-z])/.test(t)) return 'ja';
+    if (/^zh(?![a-z])/.test(t)) return 'zh';
+    return null;
+  };
+  const forced = pick(process.env.SYSLINE_LANG);
+  if (forced) return forced;
+
+  const run = (cmd, args) => execFileSync(cmd, args,
+    { encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'] });
+  const candidates = [];
+  if (process.platform === 'darwin') {
+    try {
+      // 输出形如 (\n    "zh-Hans-JP",\n    "ja-JP"\n)
+      const out = run('defaults', ['read', '-g', 'AppleLanguages']);
+      candidates.push(...[...out.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+    } catch { /* fall through */ }
+  } else if (process.platform === 'win32') {
+    for (const [key, value] of [
+      ['HKCU\\Control Panel\\International\\User Profile', 'Languages'],
+      ['HKCU\\Control Panel\\International', 'LocaleName'],
+    ]) {
+      try {
+        // "    Languages    REG_MULTI_SZ    ja-JP\0zh-CN"  /  "    LocaleName    REG_SZ    ja-JP"
+        const out = run('reg', ['query', key, '/v', value]);
+        const m = out.match(/REG_(?:MULTI_)?SZ\s+(.+)/);
+        if (m) candidates.push(...m[1].trim().split(/\\0|\s+/));
+        if (candidates.length) break;
+      } catch { /* try next key */ }
+    }
+  }
+  if (!candidates.length) {
+    for (const k of ['LC_ALL', 'LC_MESSAGES', 'LANG', 'LANGUAGE']) {
+      const v = process.env[k];
+      if (v && v !== 'C' && v !== 'POSIX') { candidates.push(v.split(':')[0]); break; }
+    }
+  }
+  if (!candidates.length) {
+    try { candidates.push(Intl.DateTimeFormat().resolvedOptions().locale); } catch { /* ignore */ }
+  }
+  const first = candidates.find((c) => c && c.trim());
+  return (first && pick(first)) ?? 'zh';
+}
+
+// 六曜：(旧暦月 + 旧暦日) % 6 → 大安 赤口 先勝 友引 先負 仏滅（旧暦正月一日恒为先勝）
+function rokuyo(lunar) {
+  return ['大安', '赤口', '先勝', '友引', '先負', '仏滅'][(lunar.month + lunar.day) % 6];
+}
+
+// 春分 / 秋分の日：1980–2099 通用近似式
+function equinoxDay(year, base) {
+  return Math.floor(base + 0.242194 * (year - 1980) - Math.floor((year - 1980) / 4));
+}
+
+// 某年某月第 n 个星期一的日期
+function nthMonday(year, month, n) {
+  const firstDow = new Date(year, month - 1, 1).getDay(); // 0 = 周日
+  return 1 + ((8 - firstDow) % 7) + (n - 1) * 7;
+}
+
+// 日本祝日（法定，不含振替休日 / 国民の休日），没有则 null
+function japaneseHolidayBase(y, m, d) {
+  const fixed = {
+    '1-1': '元日', '2-11': '建国記念の日', '2-23': '天皇誕生日', '4-29': '昭和の日',
+    '5-3': '憲法記念日', '5-4': 'みどりの日', '5-5': 'こどもの日', '8-11': '山の日',
+    '11-3': '文化の日', '11-23': '勤労感謝の日',
+  };
+  const key = `${m}-${d}`;
+  if (fixed[key]) return fixed[key];
+  if (m === 1 && d === nthMonday(y, 1, 2)) return '成人の日';
+  if (m === 3 && d === equinoxDay(y, 20.8431)) return '春分の日';
+  if (m === 7 && d === nthMonday(y, 7, 3)) return '海の日';
+  if (m === 9 && d === nthMonday(y, 9, 3)) return '敬老の日';
+  if (m === 9 && d === equinoxDay(y, 23.2488)) return '秋分の日';
+  if (m === 10 && d === nthMonday(y, 10, 2)) return 'スポーツの日';
+  return null;
+}
+
+// 当天的日本祝日 / 年中行事名，没有则 null
+//   振替休日：祝日落在星期日时，其后第一个不是祝日的日子补休（连着几个祝日就顺延）
+//   国民の休日：夹在两个祝日之间的平日（如敬老の日和秋分の日之间）
+//   年中行事：節分（立春前一天）、ひな祭り、七夕、お盆、大晦日
+function japaneseHoliday(now) {
   const y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
-  const weekdayText = new Intl.DateTimeFormat('zh-CN', { weekday: 'long' }).format(now);
+  const base = japaneseHolidayBase(y, m, d);
+  if (base) return base;
+  const at = (offset) => new Date(y, m - 1, d + offset);
+  const holidayAt = (offset) => {
+    const t = at(offset);
+    return japaneseHolidayBase(t.getFullYear(), t.getMonth() + 1, t.getDate());
+  };
+  if (now.getDay() !== 0) {
+    for (let n = 1; n <= 7; n++) {
+      if (!holidayAt(-n)) break;
+      if (at(-n).getDay() === 0) return '振替休日';
+    }
+    if (holidayAt(-1) && holidayAt(1)) return '国民の休日';
+  }
+  if (m === 2 && d === solarTermDay(y, 3.87) - 1) return '節分';
+  const events = { '3-3': 'ひな祭り', '7-7': '七夕', '8-15': 'お盆', '12-31': '大晦日' };
+  return events[`${m}-${d}`] ?? null;
+}
+
+// zh: "今天是2026年9月9日，农历七月廿八（中秋节），星期三。"
+// ja: "今日は2026年（令和8年）9月21日（敬老の日）、旧暦8月11日・大安、月曜日です。"
+function dateLine(now = new Date(), lang = systemLang()) {
+  const y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
   // 周一到周日依次用赤橙黄绿青蓝紫（24 位色）
   const WEEK_COLORS = {
     1: '\x1b[38;2;229;72;77m',   // 赤
@@ -402,21 +519,42 @@ function dateLine(now = new Date()) {
     6: '\x1b[38;2;62;99;221m',   // 蓝
     0: '\x1b[38;2;142;78;198m',  // 紫（周日）
   };
+  const weekdayText = new Intl.DateTimeFormat(lang === 'ja' ? 'ja-JP' : 'zh-CN', { weekday: 'long' }).format(now);
   const weekday = `${WEEK_COLORS[now.getDay()] ?? ''}${weekdayText}${RESET}`;
-  let lunar = '';
+  const highlight = (text) => `${festivalColor(now)}${text}${RESET}`;
+  const lunar = lunarParts(now);
+
+  if (lang === 'ja') {
+    let era = '';
+    try {
+      const parts = new Intl.DateTimeFormat('ja-JP-u-ca-japanese', { era: 'long', year: 'numeric' }).formatToParts(now);
+      const e = parts.find((p) => p.type === 'era')?.value;
+      const yy = parts.find((p) => p.type === 'year')?.value;
+      if (e && yy) era = `（${e}${yy === '1' ? '元' : yy}年）`;
+    } catch {
+      // ICU without the japanese calendar: omit the era
+    }
+    const holiday = japaneseHoliday(now);
+    const holidayPart = holiday ? `（${highlight(holiday)}）` : '';
+    // 旧暦用 ICU 的中国农历近似（日本旧暦按日本标准时推算，极少数日子会差一天）
+    const kyureki = lunar ? `旧暦${lunar.leap ? '閏' : ''}${lunar.month}月${lunar.day}日・${rokuyo(lunar)}、` : '';
+    return `今日は${y}年${era}${m}月${d}日${holidayPart}、${kyureki}${weekday}です。`;
+  }
+
+  let lunarText = '';
   try {
     const parts = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', { month: 'long', day: 'numeric' }).formatToParts(now);
     const month = parts.find((p) => p.type === 'month')?.value ?? '';
     const day = Number.parseInt(parts.find((p) => p.type === 'day')?.value ?? '', 10);
     if (month && Number.isFinite(day)) {
-      lunar = `农历${month}${lunarDayName(day)}`;
+      lunarText = `农历${month}${lunarDayName(day)}`;
     }
   } catch {
     // ICU without the chinese calendar: omit the lunar part
   }
-  const festival = chineseFestival(now, lunarParts(now));
-  const festivalPart = festival ? `（${festivalColor(now)}${festival}${RESET}）` : '';
-  const lunarPart = lunar ? `${lunar}${festivalPart}，` : (festival ? `${festivalPart}，` : '');
+  const festival = chineseFestival(now, lunar);
+  const festivalPart = festival ? `（${highlight(festival)}）` : '';
+  const lunarPart = lunarText ? `${lunarText}${festivalPart}，` : (festival ? `${festivalPart}，` : '');
   return `今天是${y}年${m}月${d}日，${lunarPart}${weekday}。`;
 }
 
@@ -456,7 +594,7 @@ async function main() {
     swapPart = ` │ ${label('Swap')} ${swapCol}${swapText}${RESET}`;
   }
 
-  // SYSLINE_DATE=YYYY-MM-DD 仅用于测试日期行
+  // 测试日期行：SYSLINE_DATE=YYYY-MM-DD 指定日期，SYSLINE_LANG=zh|ja 指定语言
   const testDate = process.env.SYSLINE_DATE ? new Date(`${process.env.SYSLINE_DATE}T12:00:00`) : null;
   const dl = testDate && !Number.isNaN(testDate.getTime()) ? dateLine(testDate) : dateLine();
   process.stdout.write(`${dl}\n${cpuPart} │ ${memPart}${swapPart}\n`);

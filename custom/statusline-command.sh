@@ -51,8 +51,8 @@ plugin_dir=$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/claude
 extra=$("$RUN" "$hud/sys-usage-line.mjs" </dev/null)
 if [ "$COLUMNS" -lt "$HUD_NARROW_COLS" ]; then
   # 窄终端：HUD 不画进度条时会给 5 小时窗口补一个 "5h" 标签（"Usage 5h 16%"），用 sed 去掉；
-  # 正则容忍标签两侧的 ANSI 转义。HUD 语言不是英文（label 不是 Usage）时此规则不生效
-  "$RUN" "${plugin_dir}${ENTRY}" | sed -E $'s/(Usage(\e\\[[0-9;]*m)*) (\e\\[[0-9;]*m)*5h(\e\\[[0-9;]*m)* /\\1 /'
+  # 正则容忍标签两侧的 ANSI 转义和 Usage 后的对齐空格（Context/Usage 分两行时插件会补齐标签宽度）。HUD 语言不是英文（label 不是 Usage）时此规则不生效
+  "$RUN" "${plugin_dir}${ENTRY}" | sed -E $'s/(Usage *(\e\\[[0-9;]*m)*) (\e\\[[0-9;]*m)*5h(\e\\[[0-9;]*m)* /\\1 /'
 else
   "$RUN" "${plugin_dir}${ENTRY}"
 fi

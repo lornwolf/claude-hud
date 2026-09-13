@@ -17,7 +17,8 @@
 #      account-label.mjs，把账号写进 config.json 的 customLine；平时只是一次 bash 内建的 -nt 比较
 #   3. 先运行 sys-usage-line.mjs 并暂存输出：它会按终端宽度把进度条 / "resets in" 的开关同步进
 #      config.json，必须在 HUD 本体之前跑，本轮才能生效
-#   4. 自动选版本号最高的插件缓存目录，运行 claude-hud 本体，最后打印暂存的日期行和 CPU/RAM 行
+#   4. 自动选版本号最高的插件缓存目录，运行 claude-hud 本体（窄终端时经 sed 去掉多出来的 "5h" 标签），
+#      最后打印暂存的日期行和 CPU/RAM 行
 #
 # 运行时二选一（custom/ 下的脚本两者都能跑）：
 #   node: RUN="/c/Program Files/nodejs/node.exe"  ENTRY=dist/index.js   node 不能直接跑 .ts
@@ -48,5 +49,11 @@ export HUD_NARROW_COLS=150
 plugin_dir=$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/claude-hud/*/ 2>/dev/null | sort -V | tail -1)
 
 extra=$("$RUN" "$hud/sys-usage-line.mjs" </dev/null)
-"$RUN" "${plugin_dir}${ENTRY}"
+if [ "$COLUMNS" -lt "$HUD_NARROW_COLS" ]; then
+  # 窄终端：HUD 不画进度条时会给 5 小时窗口补一个 "5h" 标签（"Usage 5h 16%"），用 sed 去掉；
+  # 正则容忍标签两侧的 ANSI 转义。HUD 语言不是英文（label 不是 Usage）时此规则不生效
+  "$RUN" "${plugin_dir}${ENTRY}" | sed -E $'s/(Usage(\e\\[[0-9;]*m)*) (\e\\[[0-9;]*m)*5h(\e\\[[0-9;]*m)* /\\1 /'
+else
+  "$RUN" "${plugin_dir}${ENTRY}"
+fi
 printf '%s\n' "$extra"

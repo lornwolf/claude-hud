@@ -28,7 +28,7 @@ CPU ██░░░░░░░░ 23% 66°C │ RAM ██████░░░
 
 ```
 [Fable 5.1] │ documents git:(main) │ 张三
-Context 12% │ Usage 5h 11% (4h 24m) | Weekly 16% (1d) | Fable Weekly 29% (1d)
+Context 12% │ Usage 11% (4h 24m) | Weekly 16% (1d) | Fable Weekly 29% (1d)
 今天是2026年9月13日，农历八月初三，星期日。
 CPU 18% │ RAM 99% (15.8 GB / 16.0 GB) │ Swap 0.0 GB
 ```
@@ -41,7 +41,7 @@ CPU 18% │ RAM 99% (15.8 GB / 16.0 GB) │ Swap 0.0 GB
 | `account-label.mjs` | 把当前登录账号（`~/.claude.json` 的 `oauthAccount`：名称、邮箱）记到 `account-label.json`，`sys-usage-line.mjs` 每轮据此写 `config.json` 的 `display.customLine`（宽终端 "姓名 · 邮箱"，窄终端只留姓名），HUD 原生渲染在第一行最右侧。只在 `~/.claude.json` 比 `account-label.stamp` 新时（启动 Claude Code 或 `/login` 后）由 statusLine 命令调起，账号没变不改文件；API Key 登录或读不到账号时记空值，标签随之清空 |
 | `sys-usage-line.mjs` | 追加两行：日期行和 CPU/RAM 行。还负责按终端宽度收缩：`COLUMNS` 小于 `HUD_NARROW_COLS`（默认 150，即四段带 10 格进度条的用量行宽度）时自己不画进度条，并在 HUD 本体运行前把 `display.usageBarEnabled` / `showResetLabel` / `showContextBar`（窄 false）、`pathLevels`（宽 `full` 全路径，窄 `1` 只留当前目录名）、`display.customLine`（宽 "姓名 · 邮箱"，窄只留姓名）同步进 `config.json`（只在值变化时改写，改 mtime 让插件的配置缓存失效），所以 statusLine 命令里它先于 HUD 运行、输出暂存到最后打印。这些项由脚本托管，手动改会被覆盖；设 `HUD_NARROW_COLS=9999` 可永远使用收缩样式，设 `1` 永远使用完整样式。日期行跟随系统显示语言：中文系统显示公历 + 农历 + 中国传统节日 + 七色星期；日文系统显示公历 + 令和年号 + 日本祝日（含振替休日、国民の休日）与節分/ひな祭り/七夕/お盆/大晦日 + 旧暦 + 六曜 + 七色星期，旧暦借用 ICU 的中国农历，与日本按 JST 推算的旧暦极少数日子会差一天。语言检测：macOS 读 `defaults read -g AppleLanguages` 首选语言，Windows 读注册表 `HKCU\Control Panel\International\User Profile\Languages`（退回 `LocaleName`），其他平台读 `LC_ALL`/`LC_MESSAGES`/`LANG`；不看进程的 `LANG`，因为 Claude Code 拉起 statusline 时它常是 `en_US.UTF-8`。既非中文也非日文时按中文显示。CPU 温度依次尝试：LibreHardwareMonitor 本机 Web 接口 → Windows 无需管理员的 ACPI 温区性能计数器（`typeperf` 后台采样，缓存在 `acpi-temp.csv`，30 秒刷新一次）→ Linux `/sys/class/thermal`；都读不到时静默省略。RAM 颜色：macOS 上 `os.freemem()` 把文件缓存也算成已用，占用率常年 99%，所以改按内核压力等级 `kern.memorystatus_vm_pressure_level` 着色（1 正常 → 蓝，2 警告 → 品红，3/4 紧急/严重 → 红，即活动监视器压力图的绿/黄/红），百分比照常显示；Windows/Linux 或读不到时仍按 ≥75% / ≥90% 着色。RAM 后面附 Swap：macOS 读 `sysctl vm.swapusage`，只显示已用量（总量按需增长，没有参考意义）；Linux 读 `/proc/meminfo`，显示已用 / 总量；Windows 省略。已用为 0 时暗色，否则沿用 RAM 的颜色，压力高时一起变红。测试日期行：`SYSLINE_DATE=2026-09-25 node sys-usage-line.mjs`，`SYSLINE_LANG=ja` 强制日文 |
 | `config.json` | HUD 配置。`externalUsagePath` 必须是**绝对路径**（插件不展开 `~`），请把占位符换掉。`customLine` 留空；`customLine`、`pathLevels`、`usageBarEnabled`、`showResetLabel`、`showContextBar` 由 `sys-usage-line.mjs` 按终端宽度维护（手动改都会被覆盖，账号信息改在 `~/.claude.json` 里由 `account-label.mjs` 读取）；`showDuration` 关闭，第一行最右侧留给账号 |
-| `statusline-command.sh` | `statusLine.command` 的可读版本（settings.json 里是一行），运行时可选 node 或 bun。`HUD_NARROW_COLS` 在这里设置；`sys-usage-line.mjs` 先跑并暂存输出，HUD 本体后跑，改动顺序会让宽度切换晚一轮生效 |
+| `statusline-command.sh` | `statusLine.command` 的可读版本（settings.json 里是一行），运行时可选 node 或 bun。`HUD_NARROW_COLS` 在这里设置；`sys-usage-line.mjs` 先跑并暂存输出，HUD 本体后跑，改动顺序会让宽度切换晚一轮生效。窄终端时 HUD 输出经一条 `sed` 去掉 5 小时窗口多出来的 "5h" 标签（插件不画进度条时固定输出 "Usage 5h 16%"，无配置可关），正则容忍 ANSI 转义；HUD 语言不是英文时不生效 |
 
 ## 安装
 

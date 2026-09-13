@@ -15,8 +15,9 @@
 #      </dev/null 让它不占用 HUD 要读的 stdin）
 #   2. ~/.claude.json 比 account-label.stamp 新（启动 Claude Code 或 /login 后）才运行一次
 #      account-label.mjs，把账号写进 config.json 的 customLine；平时只是一次 bash 内建的 -nt 比较
-#   3. 自动选版本号最高的插件缓存目录，运行 claude-hud 本体
-#   4. 追加运行 sys-usage-line.mjs，输出底部的日期行和 CPU/RAM 行
+#   3. 先运行 sys-usage-line.mjs 并暂存输出：它会按终端宽度把进度条 / "resets in" 的开关同步进
+#      config.json，必须在 HUD 本体之前跑，本轮才能生效
+#   4. 自动选版本号最高的插件缓存目录，运行 claude-hud 本体，最后打印暂存的日期行和 CPU/RAM 行
 #
 # 运行时二选一（custom/ 下的脚本两者都能跑）：
 #   node: RUN="/c/Program Files/nodejs/node.exe"  ENTRY=dist/index.js   node 不能直接跑 .ts
@@ -40,8 +41,12 @@ case "$cols" in ""|*[!0-9]*) cols=$(stty size 2>/dev/null </dev/tty | awk '{prin
 case "$cols" in ""|*[!0-9]*) cols=120;; esac
 export COLUMNS=$(( cols > 4 ? cols - 4 : 1 ))
 
+# 窄终端阈值：COLUMNS 小于它时进度条只留百分比，括号里去掉 "resets in"；设成 9999 就永远不显示进度条
+export HUD_NARROW_COLS=150
+
 # sort -V 做版本号排序，避免 awk 嵌套单引号在 Git Bash 下出错（上游 issue #326）
 plugin_dir=$(ls -1d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/claude-hud/*/ 2>/dev/null | sort -V | tail -1)
 
+extra=$("$RUN" "$hud/sys-usage-line.mjs" </dev/null)
 "$RUN" "${plugin_dir}${ENTRY}"
-"$RUN" "$hud/sys-usage-line.mjs"
+printf '%s\n' "$extra"

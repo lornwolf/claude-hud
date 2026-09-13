@@ -19,6 +19,7 @@
     "showSpeed": true,
     "showUsage": true,
     "usageBarEnabled": true,
+    "showResetLabel": true,
     "showSessionName": true,
     "showDuration": false,
     "externalUsagePath": "<ABSOLUTE_PATH_TO>/.claude/plugins/claude-hud/usage-snapshot.json",

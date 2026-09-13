@@ -6,6 +6,10 @@
 // label, █░ quota bar, quota colors). Lives outside the plugin cache dir so
 // plugin upgrades keep it.
 //
+// On narrow terminals (COLUMNS < HUD_NARROW_COLS, default 150) the bars are
+// dropped and claude-hud's own bar / "resets in" switches are synced into
+// config.json before the plugin renders, so both rows degrade together.
+//
 // The date line follows the OS display language: Chinese systems get the
 // Gregorian date + 农历 + Chinese festivals, Japanese systems get 令和 era +
 // 旧暦 + 六曜 + 祝日. See systemLang() for how the language is detected.
@@ -90,6 +94,41 @@ function memColor(percent, colors) {
   if (level >= 3) return resolveAnsi(colors.critical, NAMED.red);
   if (level === 2) return resolveAnsi(colors.usageWarning, NAMED.brightMagenta);
   return resolveAnsi(colors.usage, NAMED.brightBlue);
+}
+
+// 窄终端：COLUMNS（statusline 命令已减 4）小于 HUD_NARROW_COLS（默认 150）时，
+// 进度条只留百分比，括号里去掉 "resets in"。150 正好是 Context + Usage + Weekly +
+// Fable Weekly 四段带 10 格进度条的整行宽度；想永远不显示进度条就设成 9999。
+function isNarrow() {
+  const cols = Number.parseInt(process.env.COLUMNS ?? '', 10);
+  if (!Number.isFinite(cols) || cols <= 0) return false;
+  const limit = Number.parseInt(process.env.HUD_NARROW_COLS ?? '', 10);
+  return cols < (Number.isFinite(limit) && limit > 0 ? limit : 150);
+}
+
+// HUD 本体没有按宽度切换的开关，所以在它运行之前把 display.usageBarEnabled /
+// showResetLabel / showContextBar 写进 config.json（statusline 命令因此先跑本脚本）。
+// 只在值变化时才改写，改写后 mtime 变化会让插件的配置缓存失效。这三项由本脚本托管，
+// 手动改会被覆盖。
+function syncHudConfigForWidth(narrow) {
+  try {
+    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    config.display ??= {};
+    const want = { usageBarEnabled: !narrow, showResetLabel: !narrow, showContextBar: !narrow };
+    let changed = false;
+    for (const [key, value] of Object.entries(want)) {
+      if (config.display[key] !== value) {
+        config.display[key] = value;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    const tmp = `${CONFIG_PATH}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`);
+    fs.renameSync(tmp, CONFIG_PATH);
+  } catch {
+    // leave config.json alone; the next render retries
+  }
 }
 
 function barWidth() {
@@ -559,8 +598,12 @@ function dateLine(now = new Date(), lang = systemLang()) {
 }
 
 async function main() {
+  const narrow = isNarrow();
+  syncHudConfigForWidth(narrow);
   const colors = readColors();
   const width = barWidth();
+  // 窄终端不画进度条，只留百分比（和 HUD 本体那行保持一致）
+  const bar = (percent, color) => (narrow ? '' : `${quotaBar(percent, width, colors, color)} `);
   const labelColor = resolveAnsi(colors.label, DIM);
   const label = (t) => `${labelColor}${t}${RESET}`;
   const pct = (p) => `${quotaColor(p, colors)}${p}%${RESET}`;
@@ -571,15 +614,15 @@ async function main() {
   // Temperature reuses the quota palette: <75 normal, 75-89 warning, >=90 critical.
   const tempPart = temp === null ? '' : ` ${quotaColor(temp, colors)}${temp}°C${RESET}`;
   const cpuPart = cpu === null
-    ? `${label('CPU')} ${quotaBar(0, width, colors)} ${label('--')}${tempPart}`
-    : `${label('CPU')} ${quotaBar(cpu, width, colors)} ${pct(cpu)}${tempPart}`;
+    ? `${label('CPU')} ${bar(0)}${label('--')}${tempPart}`
+    : `${label('CPU')} ${bar(cpu)}${pct(cpu)}${tempPart}`;
 
   const total = os.totalmem();
   const free = Math.min(Math.max(os.freemem(), 0), total);
   const used = total - free;
   const memPercent = Math.round((used / total) * 100);
   const memCol = memColor(memPercent, colors);
-  const memPart = `${label('RAM')} ${quotaBar(memPercent, width, colors, memCol)} ${memCol}${memPercent}%${RESET} ${label(`(${gb(used)} / ${gb(total)})`)}`;
+  const memPart = `${label('RAM')} ${bar(memPercent, memCol)}${memCol}${memPercent}%${RESET} ${label(`(${gb(used)} / ${gb(total)})`)}`;
 
   // Swap: on macOS show only the amount in use (total is elastic); on Linux
   // used / total. Colored with the RAM color so heavy swapping under pressure

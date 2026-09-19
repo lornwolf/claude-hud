@@ -17,7 +17,8 @@
 //
 // CPU% is derived from the os.cpus() tick delta since the previous render,
 // persisted in cpu-sample.json next to this file. Very short deltas reuse the
-// previous value to avoid jitter.
+// previous value to avoid jitter. A counter rollback (OS reboot) discards the
+// stale sample and shows -- for one render instead of freezing the old value.
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -191,11 +192,16 @@ function cpuPercent() {
     const elapsed = now - (prev.ts ?? 0);
     const dTotal = cur.total - prev.total;
     const dIdle = cur.idle - prev.idle;
-    if (elapsed < MIN_SAMPLE_GAP_MS || dTotal <= 0) {
+    if (dTotal < 0 || dIdle < 0) {
+      // カウンタ巻き戻し（OS 再起動など）: 前回値は無効。現在の tick でサンプルを
+      // 作り直し、今回は未計測（--）として返す。
+      percent = null;
+    } else if (elapsed < MIN_SAMPLE_GAP_MS || dTotal === 0) {
       // Too soon for a meaningful delta: keep the previous reading and sample.
       return typeof prev.percent === 'number' ? prev.percent : null;
+    } else {
+      percent = Math.round(Math.min(100, Math.max(0, (1 - dIdle / dTotal) * 100)));
     }
-    percent = Math.round(Math.min(100, Math.max(0, (1 - dIdle / dTotal) * 100)));
   }
 
   try {

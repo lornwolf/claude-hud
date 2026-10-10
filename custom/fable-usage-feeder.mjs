@@ -19,13 +19,19 @@
 //     "model_scoped": [ { "display_name": "Fable Weekly", "utilization": n, "resets_at": ISO } ]
 //   }
 
+//
+// 2026-10 起也作为模块使用：hud-collector.mjs 常驻进程直接调用 runFeeder()，不再由 statusline
+// 命令每 4 分钟 spawn 一个 node。直接 `node fable-usage-feeder.mjs [--force]` 运行时行为不变。
+
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as https from 'node:https';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { isDirectEntrypoint } from './hud-shared.mjs';
 
-const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SNAPSHOT_PATH = path.join(HERE, 'usage-snapshot.json');
 const STAMP_PATH = path.join(HERE, 'usage-feeder.stamp');
 const LOCK_PATH = path.join(HERE, 'usage-feeder.lock');
@@ -35,8 +41,6 @@ const REFRESH_MS = 5 * 60_000;      // matches the usage API rate-limit window
 const LOCK_STALE_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const LOG_MAX_BYTES = 64 * 1024;
-
-const force = process.argv.includes('--force');
 
 function log(msg) {
   try {
@@ -216,13 +220,15 @@ function writeSnapshotAtomic(snapshot) {
   fs.renameSync(tmp, SNAPSHOT_PATH);
 }
 
-async function main() {
+// 拉一次用量快照。距上次尝试不足 5 分钟（无论成败）就直接返回；force 跳过这个节流。
+// 返回 'ok' / 'skipped' / 'fail'。
+export async function runFeeder({ force = false } = {}) {
   const now = Date.now();
   if (!force && now - mtimeMs(STAMP_PATH) < REFRESH_MS) {
-    return; // attempted recently (success or failure); let the HUD use what it has
+    return 'skipped'; // attempted recently (success or failure); let the HUD use what it has
   }
   if (!acquireLock()) {
-    return; // another feeder is running
+    return 'skipped'; // another feeder is running
   }
   try {
     touchStamp();
@@ -234,15 +240,19 @@ async function main() {
     if (force) {
       console.log(JSON.stringify(snapshot, null, 2));
     }
+    return 'ok';
   } catch (e) {
     log(`fail ${e.message}`);
     if (force) {
       console.error(`fable-usage-feeder: ${e.message}`);
       process.exitCode = 1;
     }
+    return 'fail';
   } finally {
     releaseLock();
   }
 }
 
-main();
+if (isDirectEntrypoint(import.meta.url)) {
+  runFeeder({ force: process.argv.includes('--force') });
+}

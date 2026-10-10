@@ -20,12 +20,19 @@
 // previous value to avoid jitter. A counter rollback (OS reboot) discards the
 // stale sample and shows -- for one render instead of freezing the old value.
 
+//
+// 2026-10 起本文件同时是一个模块：hud-collector.mjs 常驻进程调用这里的 cpuTicks / fetchCpuTemp /
+// systemLang 采样，hud-render.mjs 用 buildExtraLines / applyWidthToConfig 排版，都不再另起进程。
+// 直接 `node sys-usage-line.mjs` 运行时行为和以前一样（独立采样并打印两行）。
+
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync, spawn } from 'node:child_process';
+import { isDirectEntrypoint, readState, isStateFresh } from './hud-shared.mjs';
 
-const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PATH = path.join(HERE, 'cpu-sample.json');
 const ACCOUNT_PATH = path.join(HERE, 'account-label.json');
 const CONFIG_PATH = path.join(HERE, 'config.json');
@@ -49,7 +56,7 @@ function resolveAnsi(value, fallback) {
   return NAMED[value] ?? fallback;
 }
 
-function readColors() {
+export function readColors() {
   try {
     const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     return cfg?.colors ?? {};
@@ -102,7 +109,7 @@ function memColor(percent, colors) {
 // 窄终端：COLUMNS（statusline 命令已减 4）小于 HUD_NARROW_COLS（默认 150）时，
 // 进度条只留百分比，括号里去掉 "resets in"。150 正好是 Context + Usage + Weekly +
 // Fable Weekly 四段带 10 格进度条的整行宽度；想永远不显示进度条就设成 9999。
-function isNarrow() {
+export function isNarrow() {
   const cols = Number.parseInt(process.env.COLUMNS ?? '', 10);
   if (!Number.isFinite(cols) || cols <= 0) return false;
   const limit = Number.parseInt(process.env.HUD_NARROW_COLS ?? '', 10);
@@ -117,7 +124,7 @@ function isNarrow() {
 //     账号来自 account-label.mjs 维护的 account-label.json；文件还没生成时不动 customLine
 // 只在值变化时才改写，改写后 mtime 变化会让插件的配置缓存失效。这些项由本脚本托管，
 // 手动改会被覆盖。
-function accountLabel(narrow) {
+export function accountLabel(narrow) {
   try {
     const { displayName = '', emailAddress = '' } = JSON.parse(fs.readFileSync(ACCOUNT_PATH, 'utf8'));
     if (narrow) return displayName || emailAddress;
@@ -127,36 +134,45 @@ function accountLabel(narrow) {
   }
 }
 
-function syncHudConfigForWidth(narrow) {
+// 把按宽度切换的几项写进一个 config 对象（原地修改），返回是否有改动。
+// hud-render.mjs 对插件 loadConfig() 的结果调用它，只改内存不落盘，所以不同宽度的终端互不干扰。
+export function applyWidthToConfig(config, narrow) {
+  config.display ??= {};
+  let changed = false;
+  const set = (obj, key, value) => {
+    if (obj[key] !== value) {
+      obj[key] = value;
+      changed = true;
+    }
+  };
+  set(config.display, 'usageBarEnabled', !narrow);
+  set(config.display, 'showResetLabel', !narrow);
+  set(config.display, 'showContextBar', !narrow);
+  set(config, 'pathLevels', narrow ? 1 : 'full');
+  const label = accountLabel(narrow);
+  if (label !== null) {
+    set(config.display, 'customLine', label);
+    set(config.display, 'customLinePosition', 'last');
+  }
+  return changed;
+}
+
+// 旧方式：直接改写 config.json（独立运行本脚本时仍用它）。
+export function syncHudConfigForWidth(narrow) {
+  let tmp = null;
   try {
     const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    config.display ??= {};
-    let changed = false;
-    const set = (obj, key, value) => {
-      if (obj[key] !== value) {
-        obj[key] = value;
-        changed = true;
-      }
-    };
-    set(config.display, 'usageBarEnabled', !narrow);
-    set(config.display, 'showResetLabel', !narrow);
-    set(config.display, 'showContextBar', !narrow);
-    set(config, 'pathLevels', narrow ? 1 : 'full');
-    const label = accountLabel(narrow);
-    if (label !== null) {
-      set(config.display, 'customLine', label);
-      set(config.display, 'customLinePosition', 'last');
-    }
-    if (!changed) return;
-    const tmp = `${CONFIG_PATH}.${process.pid}.tmp`;
+    if (!applyWidthToConfig(config, narrow)) return;
+    tmp = `${CONFIG_PATH}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`);
     fs.renameSync(tmp, CONFIG_PATH);
   } catch {
-    // leave config.json alone; the next render retries
+    // leave config.json alone; the next render retries。rename 失败（别的进程正在读）时把 tmp 删掉
+    if (tmp) { try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ } }
   }
 }
 
-function barWidth() {
+export function barWidth() {
   const cols = Number.parseInt(process.env.COLUMNS ?? '', 10);
   if (Number.isFinite(cols) && cols > 0) {
     if (cols >= 100) return 10;
@@ -166,7 +182,7 @@ function barWidth() {
   return 10;
 }
 
-function cpuTicks() {
+export function cpuTicks() {
   let idle = 0, total = 0;
   for (const cpu of os.cpus()) {
     for (const [k, v] of Object.entries(cpu.times)) {
@@ -177,7 +193,7 @@ function cpuTicks() {
   return { idle, total };
 }
 
-function cpuPercent() {
+export function cpuPercent() {
   const now = Date.now();
   const cur = cpuTicks();
   let prev = null;
@@ -221,7 +237,7 @@ function gb(bytes) {
 //   total grows on demand, so only `used` is meaningful there.
 // Linux: /proc/meminfo SwapTotal/SwapFree (kB).
 // Windows: omitted (Win32_PageFileUsage needs PowerShell/WMI, too slow per render).
-function swapUsage() {
+export function swapUsage() {
   try {
     if (process.platform === 'darwin') {
       const out = execFileSync('sysctl', ['-n', 'vm.swapusage'],
@@ -267,7 +283,7 @@ const ACPI_REFRESH_MS = 30_000;      // re-sample when the cache is older than t
 const ACPI_SPAWN_GAP_MS = 10_000;    // never spawn typeperf more often than this
 const ACPI_STALE_MS = 5 * 60_000;    // hide the value when the cache is this old
 
-async function fetchCpuTemp() {
+export async function fetchCpuTemp() {
   const lhm = await fetchLhmTemp();
   if (lhm !== null) return lhm;
   if (process.platform === 'win32') return acpiTempWindows();
@@ -469,7 +485,7 @@ function festivalColor(now) {
 //      读不到再退回 HKCU\Control Panel\International\LocaleName（区域格式）
 //   4. 其他 / 都读不到: LC_ALL, LC_MESSAGES, LANG, LANGUAGE，最后是 ICU 默认 locale
 // 第一个读到的语言标签就是结论；既不是中文也不是日文时按中文显示。
-function systemLang() {
+export function systemLang() {
   const pick = (tag) => {
     const t = String(tag ?? '').trim().toLowerCase();
     if (/^ja(?![a-z])/.test(t)) return 'ja';
@@ -576,7 +592,7 @@ function japaneseHoliday(now) {
 
 // zh: "今天是2026年9月9日，农历七月廿八（中秋节），星期三。"
 // ja: "今日は2026年（令和8年）9月21日（敬老の日）、旧暦8月11日・大安、月曜日です。"
-function dateLine(now = new Date(), lang = systemLang()) {
+export function dateLine(now = new Date(), lang = systemLang()) {
   const y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
   // 周一到周日依次用赤橙黄绿青蓝紫（24 位色）
   const WEEK_COLORS = {
@@ -627,20 +643,17 @@ function dateLine(now = new Date(), lang = systemLang()) {
   return `今天是${y}年${m}月${d}日，${lunarPart}${weekday}。`;
 }
 
-async function main() {
-  const narrow = isNarrow();
-  syncHudConfigForWidth(narrow);
-  const colors = readColors();
+// 排版：给定采样值，返回"日期行 + CPU/RAM 行"两行文本（末尾带换行）。不做任何采样。
+//   cpu: 0-100 或 null（显示 --）   temp: 摄氏度或 null（省略）
+//   swap: { used, total } 或 null    narrow: 窄终端（不画进度条）
+//   lang: 'zh' | 'ja'（省略时现查系统语言，会起 reg 进程，常驻进程应传入缓存值）
+export function buildExtraLines({ cpu, temp, swap = null, narrow = isNarrow(), colors = readColors(), lang, now = new Date() }) {
   const width = barWidth();
   // 窄终端不画进度条，只留百分比（和 HUD 本体那行保持一致）
   const bar = (percent, color) => (narrow ? '' : `${quotaBar(percent, width, colors, color)} `);
   const labelColor = resolveAnsi(colors.label, DIM);
   const label = (t) => `${labelColor}${t}${RESET}`;
   const pct = (p) => `${quotaColor(p, colors)}${p}%${RESET}`;
-
-  const tempPromise = fetchCpuTemp();
-  const cpu = cpuPercent();
-  const temp = await tempPromise;
   // Temperature reuses the quota palette: <75 normal, 75-89 warning, >=90 critical.
   const tempPart = temp === null ? '' : ` ${quotaColor(temp, colors)}${temp}°C${RESET}`;
   const cpuPart = cpu === null
@@ -657,7 +670,6 @@ async function main() {
   // Swap: on macOS show only the amount in use (total is elastic); on Linux
   // used / total. Colored with the RAM color so heavy swapping under pressure
   // reads red, and dim like a label when swap is idle.
-  const swap = swapUsage();
   let swapPart = '';
   if (swap) {
     const swapText = process.platform === 'darwin' || !swap.total
@@ -669,8 +681,26 @@ async function main() {
 
   // 测试日期行：SYSLINE_DATE=YYYY-MM-DD 指定日期，SYSLINE_LANG=zh|ja 指定语言
   const testDate = process.env.SYSLINE_DATE ? new Date(`${process.env.SYSLINE_DATE}T12:00:00`) : null;
-  const dl = testDate && !Number.isNaN(testDate.getTime()) ? dateLine(testDate) : dateLine();
-  process.stdout.write(`${dl}\n${cpuPart} │ ${memPart}${swapPart}\n`);
+  const day = testDate && !Number.isNaN(testDate.getTime()) ? testDate : now;
+  const dl = lang ? dateLine(day, lang) : dateLine(day);
+  return `${dl}\n${cpuPart} │ ${memPart}${swapPart}\n`;
 }
 
-main();
+// 独立运行：优先用采集进程写的 shared/state.json（新鲜时），否则自己采样（旧行为）
+async function main() {
+  const narrow = isNarrow();
+  syncHudConfigForWidth(narrow);
+  const state = readState();
+  if (isStateFresh(state) && state.sys) {
+    process.stdout.write(buildExtraLines({ cpu: state.sys.cpu ?? null, temp: state.sys.temp ?? null, swap: state.sys.swap ?? null, narrow, lang: state.lang }));
+    return;
+  }
+  const tempPromise = fetchCpuTemp();
+  const cpu = cpuPercent();
+  const temp = await tempPromise;
+  process.stdout.write(buildExtraLines({ cpu, temp, swap: swapUsage(), narrow }));
+}
+
+if (isDirectEntrypoint(import.meta.url)) {
+  main();
+}

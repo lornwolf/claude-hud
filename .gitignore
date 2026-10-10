@@ -19,3 +19,6 @@ node_modules/
 Thumbs.db
 .vscode/
 .idea/
+
+# Shared runtime directory of hud-collector.mjs / hud-render.mjs
+shared/

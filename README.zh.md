@@ -458,6 +458,6 @@ git fetch upstream --tags
 git merge v0.14.0            # 或 upstream/main
 ```
 
-合并时只有 `README.md` / `README.zh.md` 会冲突：取上游版本，再把顶部的 📌 说明和文末的本节整段接回去。`.github/` 在本仓库里是删掉的，上游改动它时保持删除即可。合并后按上面「和插件的耦合点」检查 `hud-pipeline.mjs`，测试通过再部署：`claude plugin update claude-hud@claude-hud` 让插件缓存更到同一版本（`hud-render.mjs` 自动选版本号最高的缓存目录），`custom/*.mjs` 复制到 `~/.claude/plugins/claude-hud/`，杀掉旧的 `hud-collector.mjs` 让新代码接手。
+合并时会冲突的只有 `README.md` / `README.zh.md`（取上游版本，再把顶部的 📌 说明和文末的本节整段接回去）和 `.claude-plugin/*.json` 的版本号行（取上游版本号，owner / author / homepage / repository 保留我的信息）。`.github/` 在本仓库里是删掉的，上游改动它时保持删除即可。合并后按上面「和插件的耦合点」检查 `hud-pipeline.mjs`，测试通过再部署：`claude plugin update claude-hud@claude-hud` 让插件缓存更到同一版本（`hud-render.mjs` 自动选版本号最高的缓存目录），`custom/*.mjs` 复制到 `~/.claude/plugins/claude-hud/`，杀掉旧的 `hud-collector.mjs` 让新代码接手。
 
-不要把插件 marketplace 指向本仓库：`.claude-plugin/marketplace.json` 里登记的是上游地址，`claude plugin update` 仍应走上游。新装机器或插件缓存被清掉时，也可以直接用 `CLAUDE_HUD_PLUGIN_DIR` 指向本仓库目录。
+本机的插件 marketplace 仍指向上游 jarrodwatts/claude-hud，这样 `claude plugin update` 能直接拿到新版本；本仓库 `.claude-plugin/` 里的 owner / author / homepage / repository 已改成我的信息，只是标注，不影响安装来源。新装机器或插件缓存被清掉时，也可以直接用 `CLAUDE_HUD_PLUGIN_DIR` 指向本仓库目录。

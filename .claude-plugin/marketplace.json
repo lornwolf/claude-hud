@@ -14,15 +14,7 @@
       "source": "./",
       "description": "Real-time statusline showing context usage, active tools, running agents, and todo progress. Always visible below your input, zero config required.",
       "category": "monitoring",
-      "tags": [
-        "hud",
-        "statusline",
-        "monitoring",
-        "context",
-        "tools",
-        "agents",
-        "todos"
-      ]
+      "tags": ["hud", "statusline", "monitoring", "context", "tools", "agents", "todos"]
     }
   ]
 }

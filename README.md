@@ -374,14 +374,25 @@ Claude Code 会话 C ─ statusLine ─▶ node hud-render.mjs ─┘  没心跳
 | `fable-usage-feeder.mjs` | 导出 `runFeeder({ force })`，调 OAuth usage API（`/api/oauth/usage`），把按模型的周用量（如 Fable）写成 `usage-snapshot.json`，HUD 通过 `display.externalUsagePath` 原生读取。5 分钟内不重复请求，文件锁防并发，结果记 `usage-feeder.log`。凭据优先读 `~/.claude/.credentials.json`（Windows/Linux）；macOS 上该文件通常不存在，改从登录钥匙串的 `Claude Code-credentials` 条目读取（`security find-generic-password`）。手动测试：`node fable-usage-feeder.mjs --force` |
 | `account-label.mjs` | 导出 `accountLabelStale()` / `updateAccountLabel()`：`~/.claude.json` 比 `account-label.stamp` 新时（启动 Claude Code 或 `/login` 后），把 `oauthAccount` 的名称、邮箱写到 `account-label.json`，渲染时据此生成 `display.customLine`，HUD 原生渲染在第一行最右侧。API Key 登录或读不到账号时记空值，标签随之清空 |
 | `custom/config.json` | HUD 配置。`externalUsagePath` 必须是**绝对路径**（插件不展开 `~`），请把占位符换掉。`customLine` 留空；`customLine`、`pathLevels`、`usageBarEnabled`、`showResetLabel`、`showContextBar` 由 `hud-render.mjs` 调用 `sys-usage-line.mjs` 的 `applyWidthToConfig()` 按终端宽度在内存里覆盖（文件里的值只是宽终端的默认）；`showDuration` 关闭，第一行最右侧留给账号 |
+| `install.mjs` | 一条命令的安装 / 更新脚本，见下面「安装」。从 clone 或插件缓存目录里运行都可以；只复制脚本、生成缺失的 `config.json`、改写 `statusLine`，不碰已有的 `config.json` |
 | `statusline-command.sh` | `statusLine.command` 的可读版本和说明。真正执行的只有最后一行：`"/c/Program Files/nodejs/node.exe" "$HOME/.claude/plugins/claude-hud/hud-render.mjs"` |
 
 环境变量：`COLUMNS` 由 Claude Code 传入（≥ 2.1.153）；`HUD_NARROW_COLS` 窄终端阈值（默认 150，设 `9999` 永远收缩，设 `1` 永远完整）；`CLAUDE_HUD_DISABLE=1` 不输出；`CLAUDE_HUD_PLUGIN_DIR` 指定插件目录。
 
 ### 安装
 
+**一条命令**（新机器、更新都用它；需要 Node.js 20+、git，以及能访问本私有仓库的 GitHub 凭据，例如先 `gh auth login -h github.com -w`）：
+
+```bash
+git clone https://github.com/lornwolf/claude-hud.git && node claude-hud/custom/install.mjs
+```
+
+`custom/install.mjs` 依次做：用 `claude` CLI 登记 marketplace 并安装/更新插件本体（`claude` 不在 PATH 时退回到把本仓库目录直接当插件）→ 把 `custom/*.mjs` 复制到 `~/.claude/plugins/claude-hud/` → 没有 `config.json` 时按模板生成（已有的不动）→ 改写 `~/.claude/settings.json` 的 `statusLine`（先备份，`refreshInterval` 已有则保留）→ 结束旧采集进程并喂一份最小 stdin 验证。最后一行是 `✓ 安装完成` 就重启 Claude Code 或 `/reload-plugins`。再次更新时在 clone 里 `git pull` 后重跑同一条命令即可；插件已装好的机器上也可以在 Claude Code 里直接 `/claude-hud:install-custom`。选项：`--no-plugin` 跳过插件安装，`--repo-as-plugin` 不走插件缓存、直接用仓库目录。
+
+**手动安装**（想看清每一步时）：
+
 1. 正常安装 claude-hud 插件（0.13.0，即本仓库根目录的版本；`claude plugin update claude-hud@claude-hud` 可把缓存更到最新），并装好 [Node.js](https://nodejs.org/)（>= 20；插件本体 18 就够，但采集进程在 Linux 上用 `fs.watch` 递归监听需要 20）。
-2. 把 `custom/` 下的全部 `.mjs`（`hud-render.mjs`、`hud-pipeline.mjs`、`hud-collector.mjs`、`hud-shared.mjs`、`sys-usage-line.mjs`、`fable-usage-feeder.mjs`、`account-label.mjs`，用 Antigravity CLI 的话再加 `agy-hud-render.mjs`）和 `config.json` 放到 `~/.claude/plugins/claude-hud/`，改掉 `config.json` 里的绝对路径。
+2. 把 `custom/` 下的全部 `.mjs`（`install.mjs` 可不要；`hud-render.mjs`、`hud-pipeline.mjs`、`hud-collector.mjs`、`hud-shared.mjs`、`sys-usage-line.mjs`、`fable-usage-feeder.mjs`、`account-label.mjs`，用 Antigravity CLI 的话再加 `agy-hud-render.mjs`）和 `config.json` 放到 `~/.claude/plugins/claude-hud/`，改掉 `config.json` 里的绝对路径。
 3. 把 `~/.claude/settings.json` 的 `statusLine` 写成（node 路径按本机改；Windows 下执行命令的是 Git Bash，路径用 `/c/...` 不要用 `C:\...`）：
 
    ```json

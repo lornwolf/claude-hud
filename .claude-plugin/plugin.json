@@ -6,7 +6,7 @@
     "name": "lornwolf",
     "url": "https://github.com/lornwolf"
   },
-  "commands": ["./commands/setup.md", "./commands/configure.md"],
+  "commands": ["./commands/setup.md", "./commands/configure.md", "./commands/install-custom.md"],
   "homepage": "https://github.com/lornwolf/claude-hud",
   "repository": "https://github.com/lornwolf/claude-hud",
   "license": "MIT",

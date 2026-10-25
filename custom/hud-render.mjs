@@ -11,7 +11,8 @@
 // 做的事：
 //   1. 读 shared/state.json（hud-collector.mjs 常驻进程每 5 秒写一次）；采集进程没在跑就拉起它
 //   2. 把本会话的 cwd 登记到 shared/wanted/，采集进程据此跟踪这个仓库
-//   3. 在同一个进程里 import 插件的 dist/index.js 并调用 main(overrides)：
+//   3. 在同一个进程里 import 插件的 dist/ 各模块，经 hud-pipeline.mjs 的 runHud(pluginDir, overrides)
+//      复刻插件 main() 的流程（插件 0.10.0 起 main() 不再接受 overrides）：
 //        getGitStatus  → 用采集进程的结果（没有时只读 .git/HEAD 给分支名）
 //        loadConfig    → 读完 config.json 后按终端宽度在内存里改开关（不再改写文件）
 //        readStdin     → 顺便登记 cwd
@@ -23,12 +24,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 import {
   HERE, LOCK_PATH, SPAWN_STAMP_PATH, WANTED_DIR, STATE_FRESH_MS,
   claudeConfigDir, readState, isStateFresh, isPidAlive, readJson, cwdKey, liteGitStatus, mtimeMs,
 } from './hud-shared.mjs';
 import { applyWidthToConfig, buildExtraLines, cpuPercent } from './sys-usage-line.mjs';
+import { runHud, hudDisabled } from './hud-pipeline.mjs';
 
 const COLLECTOR = path.join(HERE, 'hud-collector.mjs');
 const GIT_RESULT_FRESH_MS = 10 * 60_000;
@@ -37,12 +38,6 @@ const SPAWN_GAP_MS = 10_000;
 // 窄终端：HUD 不画进度条时会给 5 小时窗口补一个 "5h" 标签（"Usage 5h 16%"），去掉它；
 // 正则容忍标签两侧的 ANSI 转义和 Usage 后的对齐空格。HUD 语言不是英文时不生效。
 const NARROW_5H_RE = /(Usage *(\x1b\[[0-9;]*m)*) (\x1b\[[0-9;]*m)*5h(\x1b\[[0-9;]*m)* /;
-
-function hudDisabled(env = process.env) {
-  const v = env.CLAUDE_HUD_DISABLE?.trim().toLowerCase();
-  if (v === undefined || v === '') return false;
-  return v !== '0' && v !== 'false' && v !== 'off' && v !== 'no';
-}
 
 // 版本号最高的插件缓存目录：<config>/plugins/cache/<marketplace>/claude-hud/<version>/
 function findPluginDir() {
@@ -132,19 +127,17 @@ async function main() {
   if (!pluginDir) {
     capture('[claude-hud] plugin not found under plugins/cache');
   } else {
-    const dist = (f) => pathToFileURL(path.join(pluginDir, 'dist', f)).href;
-    const [{ main: hudMain }, { loadConfig }, { readStdin }] = await Promise.all([import(dist('index.js')), import(dist('config.js')), import(dist('stdin.js'))]);
     const origLog = console.log;
     console.log = capture;
     try {
-      await hudMain({
+      await runHud(pluginDir, (plugin) => ({
         readStdin: async () => {
-          const s = await readStdin();
+          const s = await plugin.readStdin();
           if (s?.cwd) registerWant(s.cwd);
           return s;
         },
         loadConfig: async () => {
-          const config = await loadConfig();
+          const config = await plugin.loadConfig();
           applyWidthToConfig(config, narrow);
           return config;
         },
@@ -153,7 +146,7 @@ async function main() {
           return cached === undefined ? liteGitStatus(cwd) : cached;
         },
         log: capture,
-      });
+      }));
     } finally {
       console.log = origLog;
     }

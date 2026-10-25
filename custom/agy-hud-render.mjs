@@ -24,12 +24,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 import {
   HERE, LOCK_PATH, SPAWN_STAMP_PATH, WANTED_DIR, STATE_FRESH_MS,
   claudeConfigDir, readState, isStateFresh, isPidAlive, readJson, cwdKey, liteGitStatus, mtimeMs,
 } from './hud-shared.mjs';
 import { applyWidthToConfig, buildExtraLines, cpuPercent } from './sys-usage-line.mjs';
+import { runHud, loadPlugin, hudDisabled } from './hud-pipeline.mjs';
 
 const COLLECTOR = path.join(HERE, 'hud-collector.mjs');
 const ACCOUNT_LABEL_PATH = path.join(HERE, 'account-label.json');
@@ -37,12 +37,6 @@ const GIT_RESULT_FRESH_MS = 10 * 60_000;
 const WANT_REWRITE_MS = 30_000;
 const SPAWN_GAP_MS = 10_000;
 const NARROW_5H_RE = /(Usage *(\x1b\[[0-9;]*m)*) (\x1b\[[0-9;]*m)*5h(\x1b\[[0-9;]*m)* /;
-
-function hudDisabled(env = process.env) {
-  const v = env.CLAUDE_HUD_DISABLE?.trim().toLowerCase();
-  if (v === undefined || v === '') return false;
-  return v !== '0' && v !== 'false' && v !== 'off' && v !== 'no';
-}
 
 function findPluginDir() {
   const override = process.env.CLAUDE_HUD_PLUGIN_DIR?.trim();
@@ -298,16 +292,7 @@ async function main() {
   if (!pluginDir) {
     capture('[claude-hud] plugin not found under plugins/cache');
   } else {
-    const dist = (f) => pathToFileURL(path.join(pluginDir, 'dist', f)).href;
-    const [
-      { main: hudMain },
-      { loadConfig },
-      { readStdin, getUsageFromStdin: origGetUsageFromStdin },
-    ] = await Promise.all([
-      import(dist('index.js')),
-      import(dist('config.js')),
-      import(dist('stdin.js')),
-    ]);
+    const { readStdin, loadConfig, getUsageFromStdin: origGetUsageFromStdin } = await loadPlugin(pluginDir);
 
     // 先读取 agy 的 stdin JSON，以便拿到 terminal_width 后再设定 COLUMNS 与 narrow
     const rawStdin = await readStdin();
@@ -332,7 +317,7 @@ async function main() {
     const origLog = console.log;
     console.log = capture;
     try {
-      await hudMain({
+      await runHud(pluginDir, {
         readStdin: async () => rawStdin,
         loadConfig: async () => {
           const config = await loadConfig();

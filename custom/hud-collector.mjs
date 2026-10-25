@@ -147,6 +147,37 @@ function runGit(cwd, args, timeout = GIT_TIMEOUT_MS) {
   });
 }
 
+// 与插件 git.js 的 untrustedConfigOverrides 同义（0.11.1 的安全修复 GHSA-fq7j-8hxj-jfqh）：
+// 仓库自己的 .git/config 里的 core.fsmonitor 和 filter 驱动会在 git status / diff 时以当前用户身份
+// 执行任意命令，这里一律关掉（global / system 范围的 filter 如 git-lfs 不动）。
+// 结果按 .git/config 的 mtime 缓存，不用每次 refresh 都多起一个 git。
+const SAFE_GIT = ['-c', 'core.quotePath=false', '--no-optional-locks'];
+async function untrustedConfigOverrides(repo) {
+  const cfgPath = path.join(repo.gitDir, 'config');
+  let mtime = 0;
+  try { mtime = fs.statSync(cfgPath).mtimeMs; } catch { /* no config */ }
+  if (repo._safeArgs && repo._safeArgsMtime === mtime) return repo._safeArgs;
+  const overrides = ['-c', 'core.fsmonitor=false'];
+  const listed = await runGit(repo.root, ['config', '--show-scope', '-z', '--get-regexp', '^filter\\.']);
+  if (listed.ok) {
+    const drivers = new Set();
+    const fields = listed.stdout.split('\0');
+    for (let i = 0; i + 1 < fields.length; i += 2) {
+      const scope = fields[i], entry = fields[i + 1];
+      if (scope === 'global' || scope === 'system') continue;
+      const key = entry.split('\n', 1)[0];
+      const name = key.slice('filter.'.length, key.lastIndexOf('.'));
+      if (name) drivers.add(name);
+    }
+    for (const name of drivers) {
+      overrides.push('-c', `filter.${name}.clean=`, '-c', `filter.${name}.process=`, '-c', `filter.${name}.required=false`);
+    }
+  }
+  repo._safeArgs = [...SAFE_GIT, ...overrides];
+  repo._safeArgsMtime = mtime;
+  return repo._safeArgs;
+}
+
 // 与插件 git.js 的 parseFileStats 同形
 function parsePorcelainPath(field) {
   if (field.startsWith('"') && field.endsWith('"')) {
@@ -245,14 +276,16 @@ class RepoTrack {
       branch, isDirty: prev?.isDirty ?? false, ahead: 0, behind: 0,
       fileStats: prev?.fileStats, lineDiff: prev?.lineDiff, branchUrl: readBranchUrl(repo, branch), ts: now,
     };
-    const status = await runGit(repo.root, ['-c', 'core.quotePath=false', '--no-optional-locks', 'status', '--porcelain']);
+    const safe = await untrustedConfigOverrides(repo);
+    const status = await runGit(repo.root, [...safe, 'status', '--porcelain', '--ignore-submodules=dirty']);
     if (status.ok) {
       const trimmed = status.stdout.trim();
       result.isDirty = trimmed.length > 0;
       result.fileStats = result.isDirty ? parseFileStats(trimmed) : undefined;
       result.lineDiff = undefined;
       if (result.isDirty && cfg.showFileStats) {
-        const num = await runGit(repo.root, ['-c', 'core.quotePath=false', '--no-optional-locks', 'diff', '--numstat', 'HEAD']);
+        // diff-index 而不是 diff：diff 会刷新 .git/index，超时被杀时留下 index.lock（上游 0.11.0 #807）
+        const num = await runGit(repo.root, [...safe, 'diff-index', '-M', '--numstat', '--ignore-submodules=dirty', 'HEAD']);
         if (num.ok) result.lineDiff = parseNumstat(num.stdout);
       }
     } else {

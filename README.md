@@ -9,7 +9,7 @@ A Claude Code plugin that shows what's happening: context usage, rate limits, ac
 
 > 🌐 English | [中文文档](README.zh.md)
 
-> 📌 本仓库是上游 [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud) **0.8.0** 的原样快照（MIT）加上 `custom/` 里我自己的 statusLine 定制脚本。为什么钉在 0.8.0、定制怎么装，见文末「[我对 claude-hud 的定制](#我对-claude-hud-的定制custom)」。
+> 📌 本仓库是上游 [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud) 的 vendored 副本（当前 **0.13.0**，MIT，上游通过 `upstream` remote 以 merge 方式同步）加上 `custom/` 里我自己的 statusLine 定制脚本。仓库布局、定制怎么装、怎么跟上游同步，见文末「[我对 claude-hud 的定制](#我对-claude-hud-的定制custom)」。
 
 ## Install
 
@@ -319,7 +319,7 @@ MIT. See [LICENSE](LICENSE).
 **插件源码一行未改**，全部定制放在插件目录之外，通过两个口子实现：
 
 1. 插件原生配置 `config.json`（0.8.0 起有外部快照接口 `display.externalUsagePath`）。
-2. `~/.claude/settings.json` 里的 `statusLine.command`：不再直接跑插件，而是跑自己的 `hud-render.mjs`。它在**同一个 node 进程里** import 插件的 `dist/index.js` 并调用 `main(overrides)`，把 git 状态、配置、stdin 三个依赖换成自己的实现，再把插件输出截下来追加两行。
+2. `~/.claude/settings.json` 里的 `statusLine.command`：不再直接跑插件，而是跑自己的 `hud-render.mjs`。它在**同一个 node 进程里** import 插件 `dist/` 里的各个模块，由 `hud-pipeline.mjs` 复刻插件 `main()` 的流程并把 git 状态、配置、stdin 三个依赖换成自己的实现（插件 0.10.0 起 `main()` 不再接受注入），再把插件输出截下来追加两行。
 
 这样 `claude plugin update claude-hud@claude-hud` 直接升级，定制不用重做。
 唯一会破坏定制的是重新执行 `/claude-hud:setup`，它会重写 `statusLine.command`。
@@ -367,7 +367,8 @@ Claude Code 会话 C ─ statusLine ─▶ node hud-render.mjs ─┘  没心跳
 
 | 文件 | 作用 |
 |------|------|
-| `hud-render.mjs` | `statusLine.command` 的唯一入口。读 `shared/state.json`；把本会话 cwd 登记到 `shared/wanted/`；按 `plugins/cache/*/claude-hud/<版本>/dist/index.js` 找到版本号最高的插件（`CLAUDE_HUD_PLUGIN_DIR` 可指定），import 后调用 `main({ readStdin, loadConfig, getGitStatus, log })`：`getGitStatus` 返回采集进程的结果（还没有时只读 `.git/HEAD` 给分支名），`loadConfig` 读完 `config.json` 后按终端宽度在内存里改开关；截下插件输出，窄终端时去掉多出来的 "5h" 标签，再接上日期行和 CPU/RAM 行。`collector.lock` 的 mtime 超过 90 秒就 detached 拉起 `hud-collector.mjs`（多个会话同时发现时靠 `collector.spawn` 时间戳错开，多余的采集进程拿不到锁会自己退出）。采集数据不新鲜时自己算 CPU（`cpu-sample.json` 差值）、省略温度 |
+| `hud-render.mjs` | `statusLine.command` 的唯一入口。读 `shared/state.json`；把本会话 cwd 登记到 `shared/wanted/`；按 `plugins/cache/*/claude-hud/<版本>/dist/index.js` 找到版本号最高的插件（`CLAUDE_HUD_PLUGIN_DIR` 可指定），交给 `hud-pipeline.mjs` 的 `runHud(pluginDir, overrides)` 运行，注入 `readStdin`、`loadConfig`、`getGitStatus`、`log`：`getGitStatus` 返回采集进程的结果（还没有时只读 `.git/HEAD` 给分支名），`loadConfig` 读完 `config.json` 后按终端宽度在内存里改开关；截下插件输出，窄终端时去掉多出来的 "5h" 标签，再接上日期行和 CPU/RAM 行。`collector.lock` 的 mtime 超过 90 秒就 detached 拉起 `hud-collector.mjs`（多个会话同时发现时靠 `collector.spawn` 时间戳错开，多余的采集进程拿不到锁会自己退出）。采集数据不新鲜时自己算 CPU（`cpu-sample.json` 差值）、省略温度 |
+| `hud-pipeline.mjs` | 和插件耦合的唯一文件。`loadPlugin(dir)` import 插件 `dist/` 里要用的模块，`runHud(dir, overrides)` 按 `src/index.ts` 的 `main()` 复刻流程（对照版本 0.13.0），`overrides` 可注入 `readStdin`、`loadConfig`、`getGitStatus`、`getUsageFromStdin`、`parseTranscript`、`log`，也可以是 `(plugin) => overrides` 的函数以便拿到插件原版实现 |
 | `hud-collector.mjs` | 常驻采集进程，单例靠 `shared/collector.lock`（内容 pid，mtime 每拍刷新当心跳；锁的 pid 活着且心跳新鲜就退出，活着但心跳过期就接管）。每 5 秒一拍：CPU%（`os.cpus()` 差值）、RAM、Swap、CPU 温度（LibreHardwareMonitor HTTP，没有则每分钟一次 `typeperf` 后台采样，这是它唯一定期起的子进程）；每分钟调一次 `runFeeder()`（Fable 周用量，纯 HTTPS，自带 5 分钟节流）和账号标签检查；对 `shared/wanted/` 里登记的每个目录找仓库根、只读 `.git` 文件取分支名和远端地址，脏状态靠 `git status --porcelain`，只在 `fs.watch` 监听到改动（`.git/` 内只认 HEAD、ORIG_HEAD、MERGE_HEAD、index、packed-refs、refs/）或距上次超过 5 分钟时跑，同一仓库至少隔 10 秒，一拍最多 3 个仓库；`fs.watch` 失败的仓库退化为每分钟查一次。10 分钟没有会话登记就退出。日志 `shared/collector.log`。手动前台运行：`node hud-collector.mjs --foreground` |
 | `hud-shared.mjs` | 两者共用：路径常量、`state.json` 原子读写、cwd 归一化与键值、pid 存活检查、找仓库根（含 worktree 的 `.git` 文件）、只读 `.git` 文件的分支名和 GitHub 链接 |
 | `sys-usage-line.mjs` | 导出日期行 / CPU/RAM 行的生成函数 `buildExtraLines()` 和按宽度改配置的 `applyWidthToConfig()`，以及 CPU 采样、Swap、温度、系统语言等工具函数；单独 `node sys-usage-line.mjs` 运行时行为和以前一样（输出两行，优先用采集进程的数据）。窄终端（`COLUMNS` 小于 `HUD_NARROW_COLS`）时不画进度条，并把 `display.usageBarEnabled` / `showResetLabel` / `showContextBar`（窄 false）、`pathLevels`（宽 `full`，窄 `1`）、`display.customLine`（宽 "姓名 · 邮箱"，窄只留姓名）改到内存中的配置对象上。日期行跟随系统显示语言：中文系统显示公历 + 农历 + 中国传统节日 + 七色星期；日文系统显示公历 + 令和年号 + 日本祝日（含振替休日、国民の休日）与節分/ひな祭り/七夕/お盆/大晦日 + 旧暦 + 六曜 + 七色星期，旧暦借用 ICU 的中国农历，与日本按 JST 推算的旧暦极少数日子会差一天。语言检测：macOS 读 `defaults read -g AppleLanguages` 首选语言，Windows 读注册表 `HKCU\Control Panel\International\User Profile\Languages`（退回 `LocaleName`），其他平台读 `LC_ALL`/`LC_MESSAGES`/`LANG`；不看进程的 `LANG`，因为 Claude Code 拉起 statusline 时它常是 `en_US.UTF-8`。既非中文也非日文时按中文显示。CPU 温度依次尝试：LibreHardwareMonitor 本机 Web 接口 → Windows 无需管理员的 ACPI 温区性能计数器（`typeperf` 后台采样，缓存在 `acpi-temp.csv`）→ Linux `/sys/class/thermal`；都读不到时静默省略。RAM 颜色：macOS 上 `os.freemem()` 把文件缓存也算成已用，占用率常年 99%，所以改按内核压力等级 `kern.memorystatus_vm_pressure_level` 着色（1 正常 → 蓝，2 警告 → 品红，3/4 紧急/严重 → 红），百分比照常显示；Windows/Linux 或读不到时仍按 ≥75% / ≥90% 着色。RAM 后面附 Swap：macOS 读 `sysctl vm.swapusage`，只显示已用量；Linux 读 `/proc/meminfo`，显示已用 / 总量；Windows 省略。测试日期行：`SYSLINE_DATE=2026-09-25 node sys-usage-line.mjs`，`SYSLINE_LANG=ja` 强制日文 |
@@ -380,7 +381,7 @@ Claude Code 会话 C ─ statusLine ─▶ node hud-render.mjs ─┘  没心跳
 
 ### 安装
 
-1. 正常安装 claude-hud 插件（>= 0.8.0），并装好 [Node.js](https://nodejs.org/)（>= 20）。
+1. 正常安装 claude-hud 插件（0.13.0，即本仓库根目录的版本；`claude plugin update claude-hud@claude-hud` 可把缓存更到最新），并装好 [Node.js](https://nodejs.org/)（>= 20）。
 2. 把 `hud-render.mjs`、`hud-collector.mjs`、`hud-shared.mjs`、`sys-usage-line.mjs`、`fable-usage-feeder.mjs`、`account-label.mjs`、`config.json` 放到 `~/.claude/plugins/claude-hud/`，改掉 `config.json` 里的绝对路径。
 3. 把 `~/.claude/settings.json` 的 `statusLine` 写成（node 路径按本机改；Windows 下执行命令的是 Git Bash，路径用 `/c/...` 不要用 `C:\...`）：
 
@@ -424,11 +425,11 @@ Claude Code 会话 C ─ statusLine ─▶ node hud-render.mjs ─┘  没心跳
 - Claude Code 传给状态栏的 stdin `rate_limits` 只有合算的 5h/7d，没有按模型的窗口。
 - 插件有 `display.showMemoryUsage`，但没有 CPU；`--extra-cmd` 自定义标签只能渲染在第一行，放不到底部。
 - 插件的 `display.showAuthUser` 只显示邮箱 `@` 前的部分，有邮箱时不显示名称；`--extra-cmd` 每次渲染都要起一个进程，而账号很少变。所以改成账号变化时写一次标签文件。
-- 插件自己的 git 实现每次渲染都起一个 worker 进程和 5 个 git；在 Windows 的 Token 泄漏 bug 下这是最大的进程来源，所以用 `main(overrides)` 的注入口把 `getGitStatus` 换掉。
+- 插件自己的 git 实现每次渲染都起一个 worker 进程和 5 个 git；在 Windows 的 Token 泄漏 bug 下这是最大的进程来源，所以在 `hud-pipeline.mjs` 里把 `getGitStatus` 换掉。采集进程跑 git 时和上游 0.11.1 的安全修复一样关掉仓库自己的 `core.fsmonitor` 和 filter 驱动，并用 `diff-index` 代替 `diff` 以免留下 `index.lock`。
 
 ### 和插件的耦合点（升级插件后先看这里）
 
-`hud-render.mjs` 依赖插件 `dist/` 里三个导出：`index.js` 的 `main(overrides)`（可注入 `readStdin`、`loadConfig`、`getGitStatus`、`log`，输出走 `console.log`）、`config.js` 的 `loadConfig()`、`stdin.js` 的 `readStdin()`。上游改了这些接口时 HUD 会退化成报错行或原样输出，需要对应改 `hud-render.mjs`；临时可用 `CLAUDE_HUD_PLUGIN_DIR` 钉住旧版本目录（插件缓存目录按版本号分开，旧版不会被删）。
+`custom/hud-pipeline.mjs` 是唯一和插件耦合的文件：它 import 插件 `dist/` 里的 stdin.js、config.js、transcript.js、render/index.js、render/activity.js、config-reader.js、git.js、jj.js、extra-cmd.js、memory.js、auth.js、daily-cost.js、speed.js、external-usage.js、i18n/index.js，按 `src/index.ts` 的 `main()` 复刻流程（对照版本 0.13.0）。合并上游后先 `git diff <旧tag> <新tag> -- src/index.ts`，有改动就同步到 `hud-pipeline.mjs`，再跑一次 `echo '{"cwd":"<repo>","model":{"display_name":"x"}}' | CLAUDE_HUD_PLUGIN_DIR=$PWD node custom/hud-render.mjs`，输出里不能有 `[claude-hud] Error:`。临时可用 `CLAUDE_HUD_PLUGIN_DIR` 钉住旧版本目录（插件缓存目录按版本号分开，旧版不会被删）。
 
 ### 排障
 
@@ -438,7 +439,7 @@ Claude Code 会话 C ─ statusLine ─▶ node hud-render.mjs ─┘  没心跳
 | 底部两行消失 | `statusLine.command` 是否被 `/claude-hud:setup` 重写 |
 | 温度一直不显示、CPU 偶尔 `--`、git 脏状态不更新 | 采集进程没在跑：看 `shared/collector.lock` 的修改时间是否在 90 秒内、`shared/collector.log` 末尾；`node hud-collector.mjs --foreground` 前台跑一遍看报错。正常情况下任一会话的下一次刷新会在心跳过期后自动拉起它 |
 | 出现多个 `hud-collector.mjs` 进程 | 拿不到锁的会在启动时自己退出；若持续存在，看 `collector.log` 里是否反复 "taking over"（说明心跳写不进去，多半是目录权限或磁盘满） |
-| HUD 只剩一行 `[claude-hud] hud-render error: …` 或 `plugin not found` | 插件没装、缓存目录名变了，或上游改了 `main(overrides)` 接口。`CLAUDE_HUD_PLUGIN_DIR` 指到正确目录试试 |
+| HUD 只剩一行 `[claude-hud] hud-render error: …` 或 `plugin not found` | 插件没装、缓存目录名变了，或上游改了 `hud-pipeline.mjs` 依赖的导出。`CLAUDE_HUD_PLUGIN_DIR` 指到正确目录试试 |
 | HUD 完全不显示（Windows） | 执行 statusLine 的是 Git Bash：命令里不能有 `C:\...` 反斜杠路径（会被吃成 `C:...`），用 `/c/...`；把 settings.json 里的命令原样喂给 `bash -c` 看报错 |
 | 账号不显示 / 换号后没更新 | 删掉 `account-label.stamp`，等采集进程下一分钟重新同步；先看 `account-label.json` 里有没有名称和邮箱 |
 | 温度明显偏低且几乎不变（如 28°C） | LibreHardwareMonitor 没在运行或 Web 接口没开，退回了 ACPI 温区，而这台机器的温区不是 CPU。`curl http://127.0.0.1:8085/data.json` 看是否有响应 |
@@ -447,8 +448,16 @@ Claude Code 会话 C ─ statusLine ─▶ node hud-render.mjs ─┘  没心跳
 | 日期行语言不对 | `SYSLINE_LANG=ja node sys-usage-line.mjs` 能出日文说明脚本正常，是系统语言没读到：macOS 看 `defaults read -g AppleLanguages` 第一项，Windows 看 `reg query "HKCU\Control Panel\International\User Profile" /v Languages`。也可以在 statusLine 命令里直接 `export SYSLINE_LANG=ja` 固定 |
 | 想确认每次刷新到底起了几个进程 | PowerShell：`Get-CimInstance Win32_Process | ? { $_.CreationDate -gt (Get-Date).AddSeconds(-25) } | group Name`，正常只有 bash、conhost、node 三种 |
 
-### 为什么仓库根目录是插件 0.8.0 的快照
+### 仓库布局与上游同步
 
-根目录下除 `custom/` 以外的内容，是 2026-10-25 从 `~/.claude/plugins/cache/claude-hud/claude-hud/0.8.0/` 原样复制的上游插件 0.8.0（含编译好的 `dist/`，只去掉了运行时标记 `.in_use/`）。
+根目录下除 `custom/` 以外的内容就是上游插件 [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud) 本体（vendored，含编译好的 `dist/`，不含 `.github/`），当前是 **0.13.0**。上游以 git remote `upstream` 接入，历史是真正 merge 进来的，所以同步就是普通的合并：
 
-留这份快照的原因：`custom/hud-render.mjs` 依赖插件 `dist/index.js` 导出的 `main(overrides)`，上游从 0.10.0（提交 027c0de）起删掉了这个参数，0.9 以后的版本直接升级会让定制脚本失效。新装机器或插件缓存被清掉时，把本仓库（不含 `custom/`）放回 `~/.claude/plugins/cache/claude-hud/claude-hud/0.8.0/`，或用 `CLAUDE_HUD_PLUGIN_DIR` 指向本仓库目录即可。不要把插件 marketplace 指向本仓库：`.claude-plugin/marketplace.json` 里登记的是上游地址，`claude plugin update` 仍应走上游。
+```bash
+git remote add upstream https://github.com/jarrodwatts/claude-hud.git   # 只需一次
+git fetch upstream --tags
+git merge v0.14.0            # 或 upstream/main
+```
+
+合并时只有 `README.md` / `README.zh.md` 会冲突：取上游版本，再把顶部的 📌 说明和文末的本节整段接回去。`.github/` 在本仓库里是删掉的，上游改动它时保持删除即可。合并后按上面「和插件的耦合点」检查 `hud-pipeline.mjs`，测试通过再部署：`claude plugin update claude-hud@claude-hud` 让插件缓存更到同一版本（`hud-render.mjs` 自动选版本号最高的缓存目录），`custom/*.mjs` 复制到 `~/.claude/plugins/claude-hud/`，杀掉旧的 `hud-collector.mjs` 让新代码接手。
+
+不要把插件 marketplace 指向本仓库：`.claude-plugin/marketplace.json` 里登记的是上游地址，`claude plugin update` 仍应走上游。新装机器或插件缓存被清掉时，也可以直接用 `CLAUDE_HUD_PLUGIN_DIR` 指向本仓库目录。

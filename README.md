@@ -131,3 +131,9 @@ Claude Code 会话 C ─ statusLine ─▶ node hud-render.mjs ─┘  没心跳
 | 进度条时有时无、路径或账号忽长忽短 / 想固定 | 这是按 `COLUMNS` 自动切换的（阈值 `HUD_NARROW_COLS`，默认 150）。要永远用完整样式设成 1，永远用收缩样式设成 9999 |
 | 日期行语言不对 | `SYSLINE_LANG=ja node sys-usage-line.mjs` 能出日文说明脚本正常，是系统语言没读到：macOS 看 `defaults read -g AppleLanguages` 第一项，Windows 看 `reg query "HKCU\Control Panel\International\User Profile" /v Languages`。也可以在 statusLine 命令里直接 `export SYSLINE_LANG=ja` 固定 |
 | 想确认每次刷新到底起了几个进程 | PowerShell：`Get-CimInstance Win32_Process | ? { $_.CreationDate -gt (Get-Date).AddSeconds(-25) } | group Name`，正常只有 bash、conhost、node 三种 |
+
+## plugin-0.8.0/ —— 本机实际安装的插件本体快照
+
+`plugin-0.8.0/` 是 2026-10-25 从 `~/.claude/plugins/cache/claude-hud/claude-hud/0.8.0/` 原样复制的上游插件 [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud) 0.8.0（MIT，见其中的 LICENSE），含编译好的 `dist/`。只去掉了运行时标记 `.in_use/` 和一份旧的 `custom/` 副本。
+
+留这份快照的原因：`custom/hud-render.mjs` 依赖插件 `dist/index.js` 导出的 `main(overrides)`，上游从 0.10.0（提交 027c0de）起删掉了这个参数，0.9 以后的版本直接升级会让定制脚本失效。新装机器或插件缓存被清掉时，把这个目录放回 `~/.claude/plugins/cache/claude-hud/claude-hud/0.8.0/`，或用 `CLAUDE_HUD_PLUGIN_DIR` 指向它即可。不要把插件 marketplace 指向本仓库（没有 `.claude-plugin/marketplace.json` 的仓库结构，`claude plugin update` 会报错）。

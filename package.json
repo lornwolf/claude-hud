@@ -26,7 +26,7 @@
     "statusline",
     "hud"
   ],
-  "author": "Jarrod Watts",
+  "author": "lornwolf",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"

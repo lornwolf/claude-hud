@@ -87,7 +87,7 @@ Claude Code runs the new command as soon as settings.json changes, so the HUD sh
 - header: "claude-hud"
 - question: "Setup complete! The HUD should be showing below your input field. Is it working?"
 - options:
-  - "Yes, and star the repo ⭐": run `gh repo star jarrodwatts/claude-hud`. If `gh` is missing or lacks that subcommand, run `gh api -X PUT /user/starred/jarrodwatts/claude-hud`, or give them https://github.com/jarrodwatts/claude-hud.
+  - "Yes, and star the repo ⭐": run `gh repo star lornwolf/claude-hud`. If `gh` is missing or lacks that subcommand, run `gh api -X PUT /user/starred/lornwolf/claude-hud`, or give them https://github.com/lornwolf/claude-hud.
   - "Yes, it's working"
   - "No, something's wrong"
 

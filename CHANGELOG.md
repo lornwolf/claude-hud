@@ -39,7 +39,7 @@ All notable changes to Claude HUD will be documented in this file.
 ## [0.11.1] - 2026-10-12
 
 ### Security
-- Git status no longer runs commands that a repository's own config names. A directory whose `.git/config` (or a file it includes, or a submodule's config) set `core.fsmonitor` or a filter driver could run any command as you on every render ([GHSA-fq7j-8hxj-jfqh](https://github.com/jarrodwatts/claude-hud/security/advisories/GHSA-fq7j-8hxj-jfqh)). Filters from your global or system config, such as git-lfs, still run.
+- Git status no longer runs commands that a repository's own config names. A directory whose `.git/config` (or a file it includes, or a submodule's config) set `core.fsmonitor` or a filter driver could run any command as you on every render ([GHSA-fq7j-8hxj-jfqh](https://github.com/lornwolf/claude-hud/security/advisories/GHSA-fq7j-8hxj-jfqh)). Filters from your global or system config, such as git-lfs, still run.
 
 ### Changed
 - Uncommitted changes inside a submodule no longer mark the repository dirty; a submodule moved to a new commit still does.
@@ -487,7 +487,7 @@ This release is a rewrite for simplicity, with the same options (except `display
 - Reconvert Date objects when reading from usage API cache (#45)
 
 ### Credits
-- Ideas from [#30](https://github.com/jarrodwatts/claude-hud/pull/30) ([@r-firpo](https://github.com/r-firpo)), [#43](https://github.com/jarrodwatts/claude-hud/pull/43) ([@yansircc](https://github.com/yansircc)), [#49](https://github.com/jarrodwatts/claude-hud/pull/49) ([@StephenJoshii](https://github.com/StephenJoshii)) informed the autocompact solution
+- Ideas from [#30](https://github.com/lornwolf/claude-hud/pull/30) ([@r-firpo](https://github.com/r-firpo)), [#43](https://github.com/lornwolf/claude-hud/pull/43) ([@yansircc](https://github.com/yansircc)), [#49](https://github.com/lornwolf/claude-hud/pull/49) ([@StephenJoshii](https://github.com/StephenJoshii)) informed the autocompact solution
 
 ### Dependencies
 - Bump @types/node from 25.0.3 to 25.0.6 (#61)

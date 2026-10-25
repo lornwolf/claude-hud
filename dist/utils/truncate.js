@@ -1,16 +1,17 @@
-/**
- * Truncate a string to `maxLen` characters, appending an ellipsis when
- * the string exceeds the limit.
- *
- * @param text    - The string to truncate.
- * @param maxLen  - Maximum character length (including the suffix).
- * @param suffix  - The truncation indicator (default: `'...'`).
- */
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+/** Cut within the UTF-16 length budget without splitting graphemes; append `suffix` when cut. */
 export function truncateString(text, maxLen, suffix = '...') {
     if (!text)
         return '';
     if (text.length <= maxLen)
         return text;
-    return text.slice(0, Math.max(0, maxLen - suffix.length)) + suffix;
+    const limit = Math.max(0, maxLen - suffix.length);
+    let end = 0;
+    for (const { segment, index } of GRAPHEMES.segment(text)) {
+        if (index + segment.length > limit)
+            break;
+        end = index + segment.length;
+    }
+    return text.slice(0, end) + suffix;
 }
 //# sourceMappingURL=truncate.js.map

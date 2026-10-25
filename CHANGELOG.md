@@ -4,16 +4,124 @@ All notable changes to Claude HUD will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-24
+
 ### Added
-- `display.showDailyCost` option to show today's cumulative spend across sessions (`Today $12.34`), accumulated from the native stdin `cost.total_cost_usd` into a per-day ledger that resets at local midnight (#695).
+- `cost` can now be placed in `elementOrder`. Listed there, the cost segment leaves the first line and becomes its own element, so a `display.mergeGroups` group can show it beside context and usage. Left out (the default), it stays on the first line as before (#827, #828).
 
 ### Fixed
+- Tasks deleted with `TaskUpdate` no longer count toward todo progress (#826).
+
+## [0.12.1] - 2026-10-21
+
+### Fixed
+- Recent Claude Code versions log `api-request-blob` lines that repeat earlier tool calls. These no longer make finished tools show as running, count tasks twice, or reset agents to `(<1s)` (#820, #821).
+- Truncated labels (todos, agent descriptions, tool names, file paths, skill and MCP names, added dirs, `--extra-cmd` and external usage labels) no longer cut an emoji or accented letter in half (#822, #823).
+
+## [0.12.0] - 2026-10-19
+
+### Added
+- `display.showAgentEffort` option to show each subagent's reasoning effort next to its model in the agents line, e.g. `◐ code-reviewer [haiku-4.5 ◔ medium]`, read from the subagent's own transcript (#815).
+
+### Fixed
+- Options that read the transcript (tools, agents, todos, config counts, session tokens, and others) no longer reread the whole file on every render. Each run picks up where the last left off, so a long session's HUD no longer slows down and then disappears once the transcript reaches hundreds of MB (#816).
+
+## [0.11.3] - 2026-10-16
+
+### Fixed
+- Background agents whose completion notice is logged as a queued command (seen in forked or resumed sessions) no longer stay `◐` running after they finish (#810).
+
+## [0.11.2] - 2026-10-13
+
+### Fixed
+- The context bar no longer drops to 0% mid-response behind gateways that write all-zero usage for thinking blocks; it keeps the last real size (#809).
+
+## [0.11.1] - 2026-10-12
+
+### Security
+- Git status no longer runs commands that a repository's own config names. A directory whose `.git/config` (or a file it includes, or a submodule's config) set `core.fsmonitor` or a filter driver could run any command as you on every render ([GHSA-fq7j-8hxj-jfqh](https://github.com/jarrodwatts/claude-hud/security/advisories/GHSA-fq7j-8hxj-jfqh)). Filters from your global or system config, such as git-lfs, still run.
+
+### Changed
+- Uncommitted changes inside a submodule no longer mark the repository dirty; a submodule moved to a new commit still does.
+
+## [0.11.0] - 2026-10-12
+
+### Added
+- A `sessionTokens` element, so `elementOrder`, `display.mergeGroups`, and `display.rightAlign` can place the `display.showSessionTokens` summary, for example on the first line. It isn't in the default order: left out, the summary keeps its own last line (#808).
+
+### Fixed
+- Fork agents whose completion notice has no `<tool-use-id>` no longer stay `◐` running after they finish (#798, #799).
+- Input that stalls partway through stdin no longer keeps the HUD waiting until Claude Code closes the pipe (#801, #805).
+- Two sessions updating the daily and weekly cost ledger at the same moment no longer drop one session's baseline (#800, #802).
+- Line diffs come from `git diff-index`, which never writes the index, so a timed-out render can't leave `.git/index.lock` behind. `--no-optional-locks` didn't stop `git diff` from writing it (#807).
+- A folder name containing ` │ ` no longer leaves the project link open over the rest of the HUD when line 1 wraps.
+
+## [0.10.0] - 2026-10-01
+
+This release is a rewrite for simplicity, with the same options (except `display.showDiskUsage`, below) in about half the source and a quarter of the test code. It needs Claude Code v2.1.260 or later.
+
+### Changed
+- Read `version`, `cost`, `prompt_cache`, `session_name`, `output_style`, and `workspace.repo` from Claude Code's stdin instead of deriving them.
+- The prompt-cache expiry and hit rate come from Claude Code's `prompt_cache`, so the expiry no longer reads `expired` while the cache is warm.
+- `display.showCost` shows Claude Code's own cost; the local pricing-table estimate is removed.
+- Context percentage always follows Claude Code's `used_percentage`, falling back to the last request's size in the transcript when Claude Code reports none. `display.autocompactBuffer` and `display.promptCacheTtlSeconds` no longer exist.
+- Session duration is Claude Code's running time for the session.
+- Git status comes from one `git status --porcelain=v2` call, down from four or five, and the branch link comes from `workspace.repo`. A repository with no commits now shows its branch.
+- The compact layout gains expanded's branch link and push-threshold colours, and `display.timeFormat: "elapsed"` now works there.
+- `/claude-hud:setup` installs a small launcher and writes `settings.json` with a helper script instead of hand-built shell commands. Existing setups keep working; re-run setup to switch. It asks nothing unless it would replace another status line; customize afterwards by asking Claude or with `/claude-hud:configure`. A `refreshInterval` you set yourself is kept.
+- `/claude-hud:configure` asks one short set of questions and previews the diff.
+- The default HUD no longer parses the transcript, runs `claude --version`, or keeps context or transcript caches on disk.
+
+### Removed
+- `display.showDiskUsage`. OS gauges are out of scope; show free disk space with `--extra-cmd` instead. Unknown config keys are ignored, so a config that still sets it keeps working without the segment (#796).
+
+### Fixed
+- The macOS memory reading no longer blocks the rest of the render.
+- The daily cost ledger no longer throws on a non-string `session_id`.
+
+### Security
+- Sanitize the output style, tool names, tool targets (paths, Grep patterns, Bash commands), todo text, and the model name before display. They reached the terminal raw.
+- `/claude-hud:setup` writes `settings.json` through a dotfiles symlink and keeps its permissions.
+
+## [0.9.0] - 2026-10-01
+
+### Added
+- `gitStatus.showWorktree` option to show the linked worktree name after the branch, e.g. `git:(feat/x) ⎇ feat-x`, read from stdin `workspace.git_worktree` (#780).
+- `display.usagePace` option to colour usage windows amber or red, marked `▲`, when they are on track to run out before they reset (#779).
+- `display.skillsMaxVisible` option to control how many skill names the skills line shows before `+N more`; `0` means unlimited, default stays 4 (#739).
+- `display.showWeeklyCost` option to show spend since the weekly quota window opened (`Week $123.45`), from the same ledger as `showDailyCost`; subscribers only (#762).
+- `display.showDailyCost` option to show today's cumulative spend across sessions (`Today $12.34`), accumulated from the native stdin `cost.total_cost_usd` into a per-day ledger that resets at local midnight (#695).
+- `display.showCacheHitRate` option to show the session's prompt-cache hit rate as `Cache hit X%` (#741).
+- Expand a leading `~` and `${VAR}` in `display.externalUsagePath` and `display.externalUsageWritePath` (#760).
+- `display.showModelScopedUsage` option to hide the per-model weekly windows (e.g. Fable) while keeping the 5h/7d windows (#728).
+
+### Fixed
+- Read `.claude.json` from inside `CLAUDE_CONFIG_DIR` when it is set, as Claude Code does, so `showAuth`, `showAuthUser`, and MCP counts work with a custom config directory (#776).
 - Refresh the prompt-cache clock when a request starts rather than when its response arrives, ignoring client-side slash command records, interrupt markers, and subagent requests (#719).
 - Treat Agent `tool_result` payloads with `isAsync` or `status: async_launched` as background so the agents line stays up until the task-notification (#734).
 - Pass `--no-optional-locks` on `git diff --numstat` so a timed-out statusline poll cannot leave `.git/index.lock` behind (#726).
 - Render the prompt-cache clock as `until <time>` so the value reads as expiry, not write time (#727).
+- Price 1-hour prompt-cache writes at 2x input instead of 1.25x in the local cost estimate (#758).
+- Show the running session's Claude Code version from stdin, falling back to `claude --version`, so `CC v…` no longer sticks when `claude` is a wrapper script (#753).
+- Keep the context cache fresh when Claude Code reports `used_percentage: 0` while `current_usage` already holds real tokens, so a later empty frame no longer restores a stale percentage (#743).
+- Show the latest response's output speed from the API time it added instead of diffing tokens against wall-clock time between renders (#772).
+- Launch the Windows + Git Bash statusline through the `cmd.exe` launcher so a statusLine shell killed mid-spawn can no longer strand a suspended `node.exe`; re-run `/claude-hud:setup` to pick it up (#748).
+- Ignore `<synthetic>` assistant records when tracking the transcript model (#774).
+- Show Claude Code's generated `ai-title` as the session name when the session was never renamed (#754).
+- Decode every C-style escape git uses in quoted porcelain paths (#765).
+- Count unmerged (`UU`, `UA`) paths in git file stats (#763).
+- Translate the elapsed usage-window suffix (#768).
+
+### Security
+- Exit quietly when the setup command cannot resolve the plugin directory instead of running `dist/index.js` relative to the current project; re-run `/claude-hud:setup` to pick it up (#759).
+- Sanitize session names before display (#754).
+- Validate and read config files through a single file descriptor so a file swapped between the checks cannot bypass them (#732).
+
+### Dependencies
+- Update the development-only `@types/node` package from 26.2.0 to 26.6.2 (#775).
 
 ### Docs
+- Document the HUD scope bar in `CONTRIBUTING.md` (#738).
 - Add the ten missing config options and the absolute-path caveat for `display.externalUsagePath` to `README.zh.md` (#730).
 
 ## [0.8.0] - 2026-08-18

@@ -1,3 +1,63 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+# dist/ is gitignored but committed on main - the plugin runs from it.
+# After changing src/, rebuild and commit it by hand: npm run build && git add -f dist/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.fifo
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment/secrets (safety)
+.env
+.env.*
+.claude/settings.json
+.claude/*.local.json
+*.pem
+*.key
+secrets/
+credentials/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temp files
+tmp/
+temp/
+*.tmp
+
+# Lock files (keep package-lock.json for npm)
+yarn.lock
+bun.lock
+
+# ---- custom/ runtime files (written by the custom scripts next to themselves) ----
 # Runtime files written by the custom scripts next to themselves
 usage-snapshot.json
 usage-feeder.log
